@@ -40,10 +40,27 @@ class RedditPost(BaseModel):
     subreddit: str
 
 
+class RedditPostWithSentiment(RedditPost):
+    """Reddit post model with sentiment analysis"""
+    sentiment_score: float = Field(..., description="Sentiment score between -1 and 1")
+    sentiment_label: str = Field(..., description="Sentiment label (positive, negative, or neutral)")
+    confidence: float = Field(..., description="Confidence score of the sentiment analysis")
+
+
 class RedditSearchResponse(BaseModel):
     """Response model for Reddit search results"""
     posts: List[RedditPost]
     metadata: Dict[str, Any]
+
+
+class RedditSearchWithSentimentResponse(BaseModel):
+    """Response model for Reddit search results with sentiment analysis"""
+    posts: List[RedditPostWithSentiment]
+    metadata: Dict[str, Any]
+    sentiment_stats: Dict[str, Any] = Field(
+        ...,
+        description="Statistics about sentiment distribution in the results"
+    )
 
 
 class SubredditInfo(BaseModel):

@@ -17,7 +17,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const noResultsMessage = document.getElementById('no-results-message');
     const analyzeAllBtn = document.getElementById('analyze-all-btn');
     
-    // Analysis Modal Elements
+    // Dashboard Elements (Inline)
+    const dashboardContainer = document.getElementById('analysis-dashboard-container');
+    const dashboardLoading = document.getElementById('dashboard-loading');
+    const dashboardContent = document.getElementById('dashboard-content');
+    const dashboardSentimentChart = document.getElementById('dashboard-sentiment-chart');
+    const dashboardKeywordsCloud = document.getElementById('dashboard-keywords-cloud');
+    const dashboardPositiveCount = document.getElementById('dashboard-positive-count');
+    const dashboardNegativeCount = document.getElementById('dashboard-negative-count');
+    const dashboardNeutralCount = document.getElementById('dashboard-neutral-count');
+    const dashboardTotalCount = document.getElementById('dashboard-total-count');
+    const dashboardPositivePercentage = document.getElementById('dashboard-positive-percentage');
+    const dashboardNegativePercentage = document.getElementById('dashboard-negative-percentage');
+    const dashboardNeutralPercentage = document.getElementById('dashboard-neutral-percentage');
+    
+    // Analysis Modal Elements (for individual post analysis)
     const analysisModal = new bootstrap.Modal(document.getElementById('analysis-modal'));
     const analysisLoading = document.getElementById('analysis-loading');
     const analysisContent = document.getElementById('analysis-content');
@@ -27,21 +41,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const sentimentScore = document.getElementById('sentiment-score');
     const sentimentExplanation = document.getElementById('sentiment-explanation');
     
-    // Bulk Analysis Dashboard Elements
-    const bulkAnalysisModal = new bootstrap.Modal(document.getElementById('bulk-analysis-modal'));
-    const bulkSentimentChart = document.getElementById('bulk-sentiment-chart');
-    const bulkKeywordsCloud = document.getElementById('bulk-keywords-cloud');
-    const positiveCount = document.getElementById('positive-count');
-    const negativeCount = document.getElementById('negative-count');
-    const neutralCount = document.getElementById('neutral-count');
-    const totalCount = document.getElementById('total-count');
-    const positivePercentage = document.getElementById('positive-percentage');
-    const negativePercentage = document.getElementById('negative-percentage');
-    const neutralPercentage = document.getElementById('neutral-percentage');
-    
     // Initialize Chart.js
     let sentimentChartInstance = null;
-    let bulkSentimentChartInstance = null;
+    let dashboardSentimentChartInstance = null;
     
     // Event Listeners
     if (searchForm) {
@@ -131,6 +133,11 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Display results
             displayResults(currentResults);
+            
+            // Automatically analyze all content if results exist
+            if (currentResults.length > 0) {
+                analyzeAllContent();
+            }
         } catch (error) {
             console.error('Error:', error);
             showAlert(`Failed to fetch data: ${error.message}`, 'danger');
@@ -151,12 +158,13 @@ document.addEventListener('DOMContentLoaded', function() {
             resultsTable.style.display = 'none';
             noResultsMessage.style.display = 'block';
             analyzeAllBtn.style.display = 'none';
+            dashboardContainer.style.display = 'none'; // Hide dashboard if no results
             return;
         }
         
         resultsTable.style.display = 'table';
         noResultsMessage.style.display = 'none';
-        analyzeAllBtn.style.display = 'inline-block';
+        analyzeAllBtn.style.display = 'none'; // Hide the analyze all button since it's automatic
         
         // Create table rows
         results.forEach((post, index) => {
@@ -200,26 +208,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 <td>u/${post.author}</td>
                 <td title="${formattedDate}">${moment(createdDate).fromNow()}</td>
                 <td>${post.score} <i class="bi bi-arrow-up-short text-muted"></i></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary analyze-btn" data-index="${index}">
-                        <i class="bi bi-graph-up"></i> Analyze
-                    </button>
-                </td>
             `;
             
             resultsTbody.appendChild(row);
         });
         
-        // Add event listeners to analyze buttons
-        document.querySelectorAll('.analyze-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const index = parseInt(btn.dataset.index);
-                analyzeContent(currentResults[index]);
-            });
-        });
-        
-        // Scroll to results
-        resultsContainer.scrollIntoView({ behavior: 'smooth' });
+        // No need to scroll to results here since dashboard will be shown above
     }
     
     /**
@@ -301,7 +295,15 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        // Show loading state
+        // Show loading state for the inline dashboard
+        dashboardContainer.style.display = 'block';
+        dashboardLoading.style.display = 'block';
+        dashboardContent.style.display = 'none';
+        
+        // Scroll to dashboard since it's now above the results
+        dashboardContainer.scrollIntoView({ behavior: 'smooth' });
+        
+        // Show loading state alert
         showAlert('Analyzing all posts, please wait...', 'info');
         
         // Extract content from all posts
@@ -368,7 +370,7 @@ document.addEventListener('DOMContentLoaded', function() {
             displayResults(currentResults);
             
             // Show dashboard with sentiment and keyword summary
-            displayBulkAnalysisDashboard();
+            displayDashboard();
             
             // Show success message
             showAlert('All posts have been analyzed successfully!', 'success');
@@ -376,11 +378,13 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             console.error('Error:', error);
             showAlert(`Failed to analyze all posts: ${error.message}`, 'danger');
+            // Hide loading spinner on error
+            dashboardLoading.style.display = 'none';
         });
     }
     
     /**
-     * Display sentiment analysis results
+     * Display sentiment analysis results (for individual post modal)
      * @param {Object} data - Sentiment analysis data
      */
     function displaySentimentAnalysis(data) {
@@ -436,10 +440,14 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: true,
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 8,
+                            padding: 10
+                        }
                     }
                 }
             }
@@ -447,7 +455,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     /**
-     * Display extracted keywords
+     * Display extracted keywords (for individual post modal)
      * @param {Object} data - Keyword extraction results
      */
     function displayKeywords(data) {
@@ -496,45 +504,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     /**
-     * Generate fallback keywords from text content when API fails
-     * @param {string} text - Text content
-     * @returns {Array} Array of keyword objects
-     */
-    function generateFallbackKeywords(text) {
-        // Basic stopwords list
-        const stopwords = ['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
-                          'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
-                          'to', 'was', 'were', 'will', 'with', 'this', 'i', 'you', 'they',
-                          'but', 'not', 'what', 'all', 'their', 'when', 'up', 'about',
-                          'so', 'out', 'if', 'into', 'just', 'do', 'can', 'some'];
-        
-        // Tokenize and clean text
-        const words = text.toLowerCase()
-            .replace(/[^\w\s]/g, '') // Remove punctuation
-            .split(/\s+/)            // Split on whitespace
-            .filter(word => 
-                word.length > 3 &&   // Only words longer than 3 chars
-                !stopwords.includes(word) && // Remove stopwords
-                !parseInt(word)      // Remove numbers
-            );
-        
-        // Count word frequency
-        const wordCounts = {};
-        words.forEach(word => {
-            wordCounts[word] = (wordCounts[word] || 0) + 1;
-        });
-        
-        // Convert to array and sort by frequency
-        const sortedWords = Object.keys(wordCounts)
-            .map(keyword => ({ keyword, count: wordCounts[keyword] }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 10); // Get top 10 keywords
-            
-        return sortedWords;
-    }
-    
-    /**
-     * Display original content
+     * Display original content (for individual post modal)
      * @param {Object} post - Reddit post object
      */
     function displayOriginalContent(post) {
@@ -626,15 +596,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     /**
-     * Display bulk analysis dashboard with sentiment and keyword summary
+     * Display dashboard with sentiment and keyword summary
      */
-    function displayBulkAnalysisDashboard() {
+    function displayDashboard() {
         // Count sentiment categories
         let positive = 0, negative = 0, neutral = 0;
         let total = currentResults.length;
         
         // Collect all keywords for aggregation
-        let allKeywords = [];
         let keywordFrequency = {};
         
         currentResults.forEach(post => {
@@ -676,22 +645,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const negPercentage = Math.round((negative / total) * 100) || 0;
         const neuPercentage = Math.max(0, 100 - posPercentage - negPercentage);
         
-        // Update sentiment summary table
-        positiveCount.textContent = positive;
-        negativeCount.textContent = negative;
-        neutralCount.textContent = neutral;
-        totalCount.textContent = total;
+        // Update the dashboard sentiment summary
+        dashboardPositiveCount.textContent = positive;
+        dashboardNegativeCount.textContent = negative;
+        dashboardNeutralCount.textContent = neutral;
+        dashboardTotalCount.textContent = total;
         
-        positivePercentage.textContent = `${posPercentage}%`;
-        negativePercentage.textContent = `${negPercentage}%`;
-        neutralPercentage.textContent = `${neuPercentage}%`;
+        dashboardPositivePercentage.textContent = `${posPercentage}%`;
+        dashboardNegativePercentage.textContent = `${negPercentage}%`;
+        dashboardNeutralPercentage.textContent = `${neuPercentage}%`;
         
-        // Create sentiment chart
-        if (bulkSentimentChartInstance) {
-            bulkSentimentChartInstance.destroy();
+        // Create sentiment chart in the dashboard
+        if (dashboardSentimentChartInstance) {
+            dashboardSentimentChartInstance.destroy();
         }
         
-        bulkSentimentChartInstance = new Chart(bulkSentimentChart, {
+        dashboardSentimentChartInstance = new Chart(dashboardSentimentChart, {
             type: 'doughnut',
             data: {
                 labels: ['Positive', 'Negative', 'Neutral'],
@@ -708,8 +677,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     legend: {
                         position: 'bottom',
                         labels: {
-                            boxWidth: 12,
-                            padding: 15
+                            boxWidth: 8,
+                            padding: 10
                         }
                     },
                     tooltip: {
@@ -737,8 +706,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Get top 20 keywords
         const topKeywords = sortedKeywords.slice(0, 20);
         
+        // Update the dashboard keywords cloud
         if (topKeywords.length === 0) {
-            bulkKeywordsCloud.innerHTML = '<p class="text-muted">No significant keywords found across posts.</p>';
+            dashboardKeywordsCloud.innerHTML = '<p class="text-muted">No significant keywords found across posts.</p>';
         } else {
             // Create keyword cloud
             const maxCount = Math.max(...topKeywords.map(k => k.count));
@@ -754,10 +724,52 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
             }).join('');
             
-            bulkKeywordsCloud.innerHTML = keywordItems;
+            dashboardKeywordsCloud.innerHTML = keywordItems;
         }
         
-        // Show the modal
-        bulkAnalysisModal.show();
+        // Show dashboard content, hide loading
+        dashboardLoading.style.display = 'none';
+        dashboardContent.style.display = 'block';
+        
+        // Scroll to dashboard when content is ready
+        dashboardContainer.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    /**
+     * Generate fallback keywords from text content when API fails
+     * @param {string} text - Text content
+     * @returns {Array} Array of keyword objects
+     */
+    function generateFallbackKeywords(text) {
+        // Basic stopwords list
+        const stopwords = ['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
+                          'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
+                          'to', 'was', 'were', 'will', 'with', 'this', 'i', 'you', 'they',
+                          'but', 'not', 'what', 'all', 'their', 'when', 'up', 'about',
+                          'so', 'out', 'if', 'into', 'just', 'do', 'can', 'some'];
+        
+        // Tokenize and clean text
+        const words = text.toLowerCase()
+            .replace(/[^\w\s]/g, '') // Remove punctuation
+            .split(/\s+/)            // Split on whitespace
+            .filter(word => 
+                word.length > 3 &&   // Only words longer than 3 chars
+                !stopwords.includes(word) && // Remove stopwords
+                !parseInt(word)      // Remove numbers
+            );
+        
+        // Count word frequency
+        const wordCounts = {};
+        words.forEach(word => {
+            wordCounts[word] = (wordCounts[word] || 0) + 1;
+        });
+        
+        // Convert to array and sort by frequency
+        const sortedWords = Object.keys(wordCounts)
+            .map(keyword => ({ keyword, count: wordCounts[keyword] }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10); // Get top 10 keywords
+            
+        return sortedWords;
     }
 }); 
