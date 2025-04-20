@@ -134,8 +134,20 @@ class NLPService:
         Returns:
             List of dicts with keywords and scores
         """
+        # Input validation
+        if not texts:
+            logger.warning("Empty texts list provided to extract_keywords")
+            return []
+            
+        # Handle case where texts might be a single item
+        if not isinstance(texts, list):
+            texts = [str(texts)]
+        
         # Preprocess texts
         processed_texts = [self._preprocess_text(text) for text in texts]
+        
+        # Handle empty texts after preprocessing
+        processed_texts = [text if text.strip() else " placeholder " for text in processed_texts]
         
         if method == "tfidf":
             return self._extract_keywords_tfidf(processed_texts, num_keywords)
@@ -299,10 +311,23 @@ class NLPService:
         num_keywords: int = 10
     ) -> List[Dict[str, Any]]:
         """Extract keywords using TF-IDF"""
+        # Ensure texts are strings, not nested lists
+        if texts and isinstance(texts[0], list):
+            logger.warning("Received nested list in texts parameter, flattening")
+            texts = [str(item) for sublist in texts for item in sublist]
+        
+        # Convert any non-string items to strings
+        texts = [str(text) if not isinstance(text, str) else text for text in texts]
+        
+        # Ensure we have at least 2 documents for TF-IDF to work properly
+        if len(texts) < 2:
+            # Add an empty document if we only have one
+            texts.append(" ")
+            
         # Create TF-IDF vectorizer
         tfidf = TfidfVectorizer(
             max_df=0.95,
-            min_df=2,
+            min_df=1,  # Changed from 2 to 1 to handle single documents better
             max_features=200,
             stop_words=self.stopwords
         )
@@ -315,6 +340,10 @@ class NLPService:
             # Get top keywords for each document
             results = []
             for i in range(len(texts)):
+                # Skip the dummy document if we added one
+                if i >= len(texts) - (1 if len(texts) == 2 and texts[-1] == " " else 0):
+                    continue
+                    
                 # Get feature indices sorted by TF-IDF score
                 doc_tfidf = tfidf_matrix[i].toarray()[0]
                 sorted_indices = doc_tfidf.argsort()[::-1]

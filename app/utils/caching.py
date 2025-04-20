@@ -124,30 +124,48 @@ def memory_cache(maxsize: int = 128, ttl: Optional[int] = 3600):
     cache_dict = {}
     cache_times = {}
     
+    def make_hashable(obj):
+        """Convert unhashable types to hashable types for caching"""
+        if isinstance(obj, list):
+            return tuple(make_hashable(item) for item in obj)
+        elif isinstance(obj, dict):
+            return tuple(sorted((k, make_hashable(v)) for k, v in obj.items()))
+        elif isinstance(obj, set):
+            return tuple(sorted(make_hashable(item) for item in obj))
+        return obj
+    
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         cached_func = functools.lru_cache(maxsize=maxsize)(func)
         
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
-            key = (args, frozenset(kwargs.items()))
-            
-            # Check TTL if enabled
-            if ttl is not None and key in cache_times:
-                current_time = time.time()
-                if current_time - cache_times[key] > ttl:
-                    # Expired, remove from dictionary
-                    cache_dict.pop(key, None)
-                    cache_times.pop(key, None)
-            
-            # Get or compute result
-            if key not in cache_dict:
-                result = func(*args, **kwargs)
-                cache_dict[key] = result
-                if ttl is not None:
-                    cache_times[key] = time.time()
-                return result
-            
-            return cache_dict[key]
+            try:
+                # Try to create a hashable key by converting unhashable types
+                hashable_args = tuple(make_hashable(arg) for arg in args)
+                hashable_kwargs = tuple(sorted((k, make_hashable(v)) for k, v in kwargs.items()))
+                key = (hashable_args, hashable_kwargs)
+                
+                # Check TTL if enabled
+                if ttl is not None and key in cache_times:
+                    current_time = time.time()
+                    if current_time - cache_times[key] > ttl:
+                        # Expired, remove from dictionary
+                        cache_dict.pop(key, None)
+                        cache_times.pop(key, None)
+                
+                # Get or compute result
+                if key not in cache_dict:
+                    result = func(*args, **kwargs)
+                    cache_dict[key] = result
+                    if ttl is not None:
+                        cache_times[key] = time.time()
+                    return result
+                
+                return cache_dict[key]
+            except Exception as e:
+                # If caching fails for any reason, just call the function directly
+                logger.warning(f"Memory cache error: {str(e)}")
+                return func(*args, **kwargs)
             
         return wrapper
     

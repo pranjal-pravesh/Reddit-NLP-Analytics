@@ -1,0 +1,283 @@
+/* Main Styles for Reddit Analysis Platform */
+
+:root {
+    --primary-color: #1e88e5;
+    --secondary-color: #7e57c2;
+    --success-color: #43a047;
+    --warning-color: #ffa000;
+    --danger-color: #e53935;
+    --info-color: #00acc1;
+    --dark-color: #212121;
+    --light-color: #f5f5f5;
+    --border-radius: 8px;
+    --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --transition: all 0.3s ease;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f9f9f9;
+    color: #333;
+    line-height: 1.6;
+}
+
+/* Card styling */
+.card {
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    transition: var(--transition);
+    margin-bottom: 1.5rem;
+    border: none;
+}
+
+.card:hover {
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+    font-weight: 500;
+    padding: 1rem;
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+/* Button styling */
+.btn {
+    border-radius: 50px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 500;
+    transition: var(--transition);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+    background-color: #1976d2;
+    border-color: #1976d2;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-success {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.btn-success:hover {
+    background-color: #388e3c;
+    border-color: #388e3c;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Navbar styling */
+.navbar {
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    padding: 0.75rem 1.5rem;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.nav-link {
+    font-weight: 500;
+    padding: 0.5rem 1rem !important;
+    transition: var(--transition);
+    border-radius: 50px;
+    margin: 0 0.25rem;
+}
+
+.nav-link:hover, .nav-link.active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Form styling */
+.form-control, .form-select {
+    border-radius: var(--border-radius);
+    padding: 0.75rem 1rem;
+    border: 1px solid #e0e0e0;
+    transition: var(--transition);
+}
+
+.form-control:focus, .form-select:focus {
+    box-shadow: 0 0 0 0.25rem rgba(30, 136, 229, 0.25);
+    border-color: var(--primary-color);
+}
+
+label.form-label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: #555;
+}
+
+/* Table styling */
+.table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.table th {
+    background-color: #f5f5f5;
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    color: #333;
+}
+
+.table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+}
+
+.table tbody tr {
+    transition: var(--transition);
+}
+
+.table tbody tr:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+/* Dashboard cards */
+.border-primary, .border-success, .border-warning, .border-info {
+    border-width: 2px !important;
+}
+
+.border-primary {
+    border-color: var(--primary-color) !important;
+}
+
+.border-success {
+    border-color: var(--success-color) !important;
+}
+
+.border-warning {
+    border-color: var(--warning-color) !important;
+}
+
+.border-info {
+    border-color: var(--info-color) !important;
+}
+
+/* Sentiment indicators */
+.sentiment-positive {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+.sentiment-negative {
+    color: var(--danger-color);
+    font-weight: 500;
+}
+
+.sentiment-neutral {
+    color: #757575;
+    font-weight: 500;
+}
+
+/* Keyword cloud */
+.keyword-item {
+    display: inline-block;
+    margin: 0.25rem;
+    padding: 0.5rem 1rem;
+    background-color: #e3f2fd;
+    border-radius: 50px;
+    color: var(--primary-color);
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.keyword-item:hover {
+    background-color: var(--primary-color);
+    color: white;
+    transform: scale(1.05);
+}
+
+/* Loading spinner */
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Footer */
+footer {
+    margin-top: 2rem;
+    padding: 2rem 0;
+    background-color: #f5f5f5;
+    color: #757575;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .display-4 {
+        font-size: 2.5rem;
+    }
+    
+    .display-5 {
+        font-size: 2rem;
+    }
+}
+
+/* Modal styling */
+.modal-content {
+    border-radius: var(--border-radius);
+    border: none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+    padding: 1rem 1.5rem;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    padding: 1rem 1.5rem;
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+}
+
+/* Tab navigation */
+.nav-tabs {
+    border-bottom: 1px solid #dee2e6;
+}
+
+.nav-tabs .nav-link {
+    margin-bottom: -1px;
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    color: #555;
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--primary-color);
+    background-color: transparent;
+    border-color: #dee2e6 #dee2e6 #fff;
+}
+
+/* Analysis charts */
+#sentiment-chart, #keywords-chart, #time-chart, #topics-chart, #subreddit-chart, #sentiment-pie-chart {
+    max-width: 100%;
+} 

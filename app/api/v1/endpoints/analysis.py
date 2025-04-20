@@ -22,6 +22,7 @@ from app.api.v1.schemas.analysis import (
 from app.core.config import settings
 from app.services.llm_service import LLMProvider, llm_service
 from app.services.nlp_service import nlp_service
+from app.utils.logging_config import logger
 
 router = APIRouter()
 
@@ -53,13 +54,44 @@ async def extract_keywords(
     Returns keywords and their scores for each input text.
     """
     try:
+        # Validate input data
+        if not request.texts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No texts provided for keyword extraction"
+            )
+            
+        # Convert any non-string items to strings and flatten if needed
+        cleaned_texts = []
+        for text in request.texts:
+            if isinstance(text, list):
+                # If text is a list, join elements with spaces
+                cleaned_texts.append(" ".join(str(item) for item in text))
+            else:
+                # Otherwise, convert to string
+                cleaned_texts.append(str(text))
+        
+        # Call NLP service with cleaned inputs
         results = nlp_service.extract_keywords(
-            texts=request.texts,
+            texts=cleaned_texts,
             method=request.method,
             num_keywords=request.num_keywords
         )
+        
+        # Validate results
+        if not results:
+            logger.warning("NLP service returned empty results for keyword extraction")
+            return {"results": [{"keywords": [], "scores": []}] * len(cleaned_texts)}
+            
         return {"results": results}
+    except ValueError as e:
+        # Handle validation errors
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request parameters: {str(e)}"
+        )
     except Exception as e:
+        logger.error(f"Error extracting keywords: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error extracting keywords: {str(e)}"

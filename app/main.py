@@ -1,9 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from app.api.v1.endpoints import analysis, reddit
 from app.core.config import settings
@@ -11,6 +14,8 @@ from app.services.llm_service import llm_service
 from app.services.reddit_client import reddit_client
 from app.utils.logging_config import logger
 
+# Set up templates directory
+templates = Jinja2Templates(directory="app/templates")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,6 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 
 # Exception handler for custom error responses
 @app.exception_handler(Exception)
@@ -70,6 +78,17 @@ async def health_check():
         "environment": settings.APP_ENV
     }
 
+# Frontend routes
+@app.get("/")
+async def index(request: Request):
+    """Serve the index page"""
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    """Serve the dashboard page"""
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
 
 # Include API routers
 app.include_router(
@@ -88,6 +107,10 @@ app.include_router(
 if __name__ == "__main__":
     """Run the application with uvicorn when script is executed directly"""
     import uvicorn
+    
+    # Create necessary directories if they don't exist
+    os.makedirs("app/static", exist_ok=True)
+    os.makedirs("app/templates", exist_ok=True)
     
     uvicorn.run(
         "app.main:app",

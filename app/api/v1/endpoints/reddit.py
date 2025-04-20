@@ -1,11 +1,14 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status, Body
 
 from app.api.v1.schemas.reddit import (
     RedditSearchParams,
     RedditSearchResponse,
     SubredditResponse,
+    SubredditRequest,
+    RedditSearchRequest,
+    UserRequest,
 )
 from app.core.dependencies import get_pagination_params, get_reddit_sort, get_reddit_timeframe
 from app.services.reddit_client import reddit_client
@@ -44,6 +47,32 @@ async def search_reddit(
         )
 
 
+@router.post("/search", response_model=RedditSearchResponse)
+async def search_reddit_post(
+    request: RedditSearchRequest = Body(...)
+):
+    """
+    POST endpoint for searching Reddit posts matching a query.
+    
+    Accepts query, sort, and time_filter parameters in the request body.
+    """
+    try:
+        result = await reddit_client.search(
+            query=request.query,
+            subreddit=None,
+            sort=request.sort,
+            timeframe=request.time_filter,
+            limit=request.limit,
+            skip=0
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error searching Reddit: {str(e)}"
+        )
+
+
 @router.get("/subreddit/{subreddit_name}", response_model=SubredditResponse)
 async def get_subreddit(
     subreddit_name: str = Path(..., min_length=1, description="Subreddit name")
@@ -58,6 +87,54 @@ async def get_subreddit(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching subreddit information: {str(e)}"
+        )
+
+
+@router.post("/subreddit", response_model=RedditSearchResponse)
+async def get_subreddit_posts(
+    request: SubredditRequest = Body(...)
+):
+    """
+    POST endpoint for fetching posts from a specific subreddit.
+    
+    Accepts subreddit name, sort, and time_filter parameters in the request body.
+    """
+    try:
+        result = await reddit_client.get_subreddit_posts(
+            subreddit=request.subreddit,
+            sort=request.sort,
+            timeframe=request.time_filter,
+            limit=request.limit
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching subreddit posts: {str(e)}"
+        )
+
+
+@router.post("/user", response_model=RedditSearchResponse)
+async def get_user_posts(
+    request: UserRequest = Body(...)
+):
+    """
+    POST endpoint for fetching posts from a specific Reddit user.
+    
+    Accepts username, sort, and time_filter parameters in the request body.
+    """
+    try:
+        result = await reddit_client.get_user_posts(
+            username=request.username,
+            sort=request.sort,
+            timeframe=request.time_filter,
+            limit=request.limit
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching user posts: {str(e)}"
         )
 
 
