@@ -259,7 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 body: JSON.stringify({ 
                     texts: [content],
-                    method: "tfidf",
+                    method: "hybrid",
                     num_keywords: 10
                 })
             });
@@ -344,7 +344,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     operation: "keywords",
                     texts: textsToAnalyze,
                     params: {
-                        method: "tfidf",
+                        method: "hybrid",
                         num_keywords: 5
                     }
                 })
@@ -451,16 +451,40 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {Object} data - Keyword extraction results
      */
     function displayKeywords(data) {
+        // Handle missing data
         if (!data || !data.keywords || data.keywords.length === 0) {
-            keywordsCloud.innerHTML = '<p class="text-muted">No significant keywords found.</p>';
+            console.log("No keywords found in data:", data);
+            
+            // Generate fallback keywords from content if needed
+            const currentPost = document.getElementById('original-content').textContent;
+            if (currentPost && currentPost.length > 0) {
+                const fallbackKeywords = generateFallbackKeywords(currentPost);
+                if (fallbackKeywords.length > 0) {
+                    const keywordItems = fallbackKeywords.map((item, i) => {
+                        // Calculate size based on frequency (higher index = less frequent)
+                        const size = 1.5 - (i * 0.05);
+                        return `
+                            <div class="keyword-item" style="font-size: ${size}em;">
+                                ${item.keyword} <small class="text-muted">(generated)</small>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    keywordsCloud.innerHTML = keywordItems;
+                    return;
+                }
+            }
+            
+            keywordsCloud.innerHTML = '<p class="text-muted">No significant keywords found. Try content with more text.</p>';
             return;
         }
         
         // Create keyword cloud
         const keywordItems = data.keywords.map((keyword, i) => {
-            const score = data.scores[i];
+            const score = data.scores && data.scores[i] ? data.scores[i] : 0.5;
             // Calculate size based on score (relative to highest score)
-            const size = 1 + (score / Math.max(...data.scores)) * 1.5;
+            const maxScore = Math.max(...(data.scores || [0.5]));
+            const size = 1 + (score / maxScore) * 1.5;
             return `
                 <div class="keyword-item" style="font-size: ${size}em;">
                     ${keyword}
@@ -469,6 +493,44 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
         
         keywordsCloud.innerHTML = keywordItems;
+    }
+    
+    /**
+     * Generate fallback keywords from text content when API fails
+     * @param {string} text - Text content
+     * @returns {Array} Array of keyword objects
+     */
+    function generateFallbackKeywords(text) {
+        // Basic stopwords list
+        const stopwords = ['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
+                          'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
+                          'to', 'was', 'were', 'will', 'with', 'this', 'i', 'you', 'they',
+                          'but', 'not', 'what', 'all', 'their', 'when', 'up', 'about',
+                          'so', 'out', 'if', 'into', 'just', 'do', 'can', 'some'];
+        
+        // Tokenize and clean text
+        const words = text.toLowerCase()
+            .replace(/[^\w\s]/g, '') // Remove punctuation
+            .split(/\s+/)            // Split on whitespace
+            .filter(word => 
+                word.length > 3 &&   // Only words longer than 3 chars
+                !stopwords.includes(word) && // Remove stopwords
+                !parseInt(word)      // Remove numbers
+            );
+        
+        // Count word frequency
+        const wordCounts = {};
+        words.forEach(word => {
+            wordCounts[word] = (wordCounts[word] || 0) + 1;
+        });
+        
+        // Convert to array and sort by frequency
+        const sortedWords = Object.keys(wordCounts)
+            .map(keyword => ({ keyword, count: wordCounts[keyword] }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10); // Get top 10 keywords
+            
+        return sortedWords;
     }
     
     /**
@@ -584,9 +646,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Collect keywords
-            if (post.keywords && post.keywords.keywords) {
+            if (post.keywords && post.keywords.keywords && post.keywords.keywords.length > 0) {
                 post.keywords.keywords.forEach((keyword, i) => {
-                    const score = post.keywords.scores[i];
+                    const score = post.keywords.scores[i] || 0.5;
                     if (!keywordFrequency[keyword]) {
                         keywordFrequency[keyword] = { count: 1, score: score };
                     } else {
@@ -594,13 +656,25 @@ document.addEventListener('DOMContentLoaded', function() {
                         keywordFrequency[keyword].score += score;
                     }
                 });
+            } else {
+                // Generate fallback keywords if none were found
+                const content = post.selftext ? `${post.title}\n\n${post.selftext}` : post.title;
+                const fallbackKeywords = generateFallbackKeywords(content);
+                
+                fallbackKeywords.forEach(item => {
+                    if (!keywordFrequency[item.keyword]) {
+                        keywordFrequency[item.keyword] = { count: 1, score: 0.5 };
+                    } else {
+                        keywordFrequency[item.keyword].count++;
+                    }
+                });
             }
         });
         
         // Calculate percentages
-        const posPercentage = Math.round((positive / total) * 100);
-        const negPercentage = Math.round((negative / total) * 100);
-        const neuPercentage = 100 - posPercentage - negPercentage;
+        const posPercentage = Math.round((positive / total) * 100) || 0;
+        const negPercentage = Math.round((negative / total) * 100) || 0;
+        const neuPercentage = Math.max(0, 100 - posPercentage - negPercentage);
         
         // Update sentiment summary table
         positiveCount.textContent = positive;

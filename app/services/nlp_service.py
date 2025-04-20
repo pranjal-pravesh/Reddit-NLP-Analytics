@@ -31,6 +31,15 @@ try:
 except LookupError:
     nltk.download('stopwords')
 
+# Spacy for advanced NLP
+import spacy
+
+# Add KeyBERT for transformer-based keyword extraction
+try:
+    from keybert import KeyBERT
+    KEYBERT_AVAILABLE = True
+except ImportError:
+    KEYBERT_AVAILABLE = False
 
 class NLPService:
     """
@@ -46,6 +55,23 @@ class NLPService:
         self.sentiment_pipeline = None
         self.stopwords = set(nltk.corpus.stopwords.words('english'))
         self.initialize_sentiment_model()
+        
+        # Initialize spaCy model for NLP tasks
+        try:
+            self.nlp = spacy.load('en_core_web_sm')
+        except:
+            logger.warning("Downloading spaCy model 'en_core_web_sm'")
+            spacy.cli.download('en_core_web_sm')
+            self.nlp = spacy.load('en_core_web_sm')
+            
+        # Initialize KeyBERT if available
+        self.keybert_model = None
+        if KEYBERT_AVAILABLE:
+            try:
+                self.keybert_model = KeyBERT()
+                logger.info("KeyBERT model initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize KeyBERT model: {str(e)}")
     
     def initialize_sentiment_model(self):
         """Initialize the sentiment analysis model"""
@@ -128,7 +154,7 @@ class NLPService:
         
         Args:
             texts: List of text strings
-            method: Keyword extraction method ('tfidf' or 'textrank')
+            method: Keyword extraction method ('tfidf', 'textrank', 'keybert' or 'hybrid')
             num_keywords: Number of keywords to return
             
         Returns:
@@ -149,7 +175,14 @@ class NLPService:
         # Handle empty texts after preprocessing
         processed_texts = [text if text.strip() else " placeholder " for text in processed_texts]
         
-        if method == "tfidf":
+        if method == "keybert" and self.keybert_model is not None:
+            return self._extract_keywords_keybert(processed_texts, num_keywords)
+        elif method == "hybrid" and self.keybert_model is not None:
+            # Hybrid method combines keybert with tfidf for better results
+            keybert_results = self._extract_keywords_keybert(processed_texts, num_keywords * 2)
+            tfidf_results = self._extract_keywords_tfidf(processed_texts, num_keywords * 2)
+            return self._combine_keyword_results(keybert_results, tfidf_results, num_keywords)
+        elif method == "tfidf":
             return self._extract_keywords_tfidf(processed_texts, num_keywords)
         elif method == "textrank":
             return self._extract_keywords_textrank(processed_texts, num_keywords)
@@ -319,29 +352,47 @@ class NLPService:
         # Convert any non-string items to strings
         texts = [str(text) if not isinstance(text, str) else text for text in texts]
         
-        # Ensure we have at least 2 documents for TF-IDF to work properly
-        if len(texts) < 2:
-            # Add an empty document if we only have one
-            texts.append(" ")
+        # Log the content being processed
+        for i, text in enumerate(texts):
+            logger.info(f"Processing text {i} for keyword extraction, length: {len(text)}")
+            logger.debug(f"Text sample: {text[:100]}...")
+        
+        # Ensure we have enough content to extract keywords
+        processed_texts = []
+        for text in texts:
+            # Ensure minimum text length by repeating short texts
+            if len(text.split()) < 3:
+                logger.warning(f"Text too short for keyword extraction - padding text")
+                # Repeat the text to give TF-IDF more to work with
+                text = (text + " ") * 3
+            processed_texts.append(text)
+        
+        # Add a baseline document if needed
+        if len(processed_texts) < 2:
+            logger.info("Adding baseline document for TF-IDF comparison")
+            processed_texts.append("reddit post content placeholder text common words")
             
-        # Create TF-IDF vectorizer
+        # Create TF-IDF vectorizer with more permissive settings for short texts
         tfidf = TfidfVectorizer(
             max_df=0.95,
-            min_df=1,  # Changed from 2 to 1 to handle single documents better
+            min_df=1,  # Accept terms that appear in just one document
             max_features=200,
-            stop_words=self.stopwords
+            stop_words=self.stopwords,
+            ngram_range=(1, 2)  # Include bigrams which can work better for short texts
         )
         
         try:
             # Fit and transform texts
-            tfidf_matrix = tfidf.fit_transform(texts)
+            tfidf_matrix = tfidf.fit_transform(processed_texts)
             feature_names = tfidf.get_feature_names_out()
+            
+            logger.info(f"TF-IDF found {len(feature_names)} features")
             
             # Get top keywords for each document
             results = []
             for i in range(len(texts)):
                 # Skip the dummy document if we added one
-                if i >= len(texts) - (1 if len(texts) == 2 and texts[-1] == " " else 0):
+                if i >= len(processed_texts) - (1 if len(processed_texts) > len(texts) else 0):
                     continue
                     
                 # Get feature indices sorted by TF-IDF score
@@ -353,6 +404,20 @@ class NLPService:
                 keywords = [feature_names[idx] for idx in top_indices if doc_tfidf[idx] > 0]
                 scores = [float(doc_tfidf[idx]) for idx in top_indices if doc_tfidf[idx] > 0]
                 
+                # If we got no keywords, try to extract some basic ones
+                if not keywords and len(processed_texts[i].split()) > 3:
+                    logger.warning(f"TF-IDF failed to extract keywords for document {i}, using fallback method")
+                    # Fallback: use most common non-stopwords
+                    words = [word.lower() for word in processed_texts[i].split() 
+                             if word.lower() not in self.stopwords and len(word) > 2]
+                    word_counts = Counter(words).most_common(num_keywords)
+                    if word_counts:
+                        keywords = [word for word, _ in word_counts]
+                        # Normalize scores
+                        max_count = max([count for _, count in word_counts]) if word_counts else 1
+                        scores = [float(count) / max_count for _, count in word_counts]
+                
+                logger.info(f"Document {i}: Found {len(keywords)} keywords")
                 results.append({
                     "keywords": keywords,
                     "scores": scores
@@ -360,7 +425,7 @@ class NLPService:
             
             return results
         except Exception as e:
-            logger.error(f"Error in TF-IDF keyword extraction: {str(e)}")
+            logger.error(f"Error in TF-IDF keyword extraction: {str(e)}", exc_info=True)
             return [{"keywords": [], "scores": []}] * len(texts)
     
     def _extract_keywords_textrank(
@@ -525,6 +590,117 @@ class NLPService:
         except Exception as e:
             logger.error(f"Error in BERTopic topic modeling: {str(e)}")
             return {"topics": [], "topic_distribution": []}
+    
+    def _extract_keywords_keybert(
+        self, 
+        texts: List[str], 
+        num_keywords: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Extract keywords using KeyBERT and transformer models"""
+        if not self.keybert_model:
+            logger.warning("KeyBERT model not available, falling back to TF-IDF")
+            return self._extract_keywords_tfidf(texts, num_keywords)
+            
+        try:
+            results = []
+            
+            for text in texts:
+                # Use keyphrase_ngram_range to control minimum and maximum length of keyphrases
+                # Using multiple keyphrase_ngram_ranges to find the best keyphrases
+                try:
+                    keybert_keywords = self.keybert_model.extract_keywords(
+                        text,
+                        keyphrase_ngram_range=(1, 3),
+                        stop_words='english',
+                        use_mmr=True,  # Use Maximal Marginal Relevance to diversify results
+                        diversity=0.7,  # Higher diversity for varied results
+                        top_n=num_keywords
+                    )
+                    
+                    if not keybert_keywords:
+                        # Try again with different settings if no results
+                        keybert_keywords = self.keybert_model.extract_keywords(
+                            text,
+                            keyphrase_ngram_range=(1, 2),
+                            stop_words='english',
+                            top_n=num_keywords
+                        )
+                        
+                    # Extract keywords and scores from results
+                    keywords = [kw[0] for kw in keybert_keywords]
+                    scores = [float(kw[1]) for kw in keybert_keywords]
+                    
+                    # If still no keywords, use fallback method
+                    if not keywords:
+                        logger.warning(f"KeyBERT failed to extract keywords, using fallback method")
+                        words = [word.lower() for word in text.split() 
+                                if word.lower() not in self.stopwords and len(word) > 2]
+                        word_counts = Counter(words).most_common(num_keywords)
+                        if word_counts:
+                            keywords = [word for word, _ in word_counts]
+                            max_count = max([count for _, count in word_counts]) if word_counts else 1
+                            scores = [float(count) / max_count for _, count in word_counts]
+                    
+                    results.append({
+                        "keywords": keywords,
+                        "scores": scores
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Error in KeyBERT keyword extraction for text: {str(e)}")
+                    # Return empty result for this text
+                    results.append({"keywords": [], "scores": []})
+                
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in KeyBERT keyword extraction: {str(e)}", exc_info=True)
+            # Fall back to TF-IDF
+            return self._extract_keywords_tfidf(texts, num_keywords)
+            
+    def _combine_keyword_results(
+        self,
+        keybert_results: List[Dict[str, Any]],
+        tfidf_results: List[Dict[str, Any]],
+        num_keywords: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Combine results from multiple keyword extraction methods"""
+        # For each document, combine the results
+        combined_results = []
+        
+        for i in range(min(len(keybert_results), len(tfidf_results))):
+            # Get keywords and scores from both methods
+            kb_keywords = keybert_results[i]["keywords"]
+            kb_scores = keybert_results[i]["scores"]
+            
+            tf_keywords = tfidf_results[i]["keywords"]
+            tf_scores = tfidf_results[i]["scores"]
+            
+            # Combine and deduplicate
+            keyword_map = {}
+            
+            # Add KeyBERT keywords with higher weight
+            for keyword, score in zip(kb_keywords, kb_scores):
+                keyword_map[keyword] = score * 1.2  # Weight KeyBERT higher
+                
+            # Add TF-IDF keywords
+            for keyword, score in zip(tf_keywords, tf_scores):
+                if keyword in keyword_map:
+                    # If keyword exists in both, take max
+                    keyword_map[keyword] = max(keyword_map[keyword], score)
+                else:
+                    keyword_map[keyword] = score
+                    
+            # Sort by score and take top N
+            sorted_keywords = sorted(keyword_map.items(), key=lambda x: x[1], reverse=True)[:num_keywords]
+            
+            # Create result dict
+            combined_results.append({
+                "keywords": [k for k, s in sorted_keywords],
+                "scores": [s for k, s in sorted_keywords]
+            })
+            
+        return combined_results
 
 
 # Create global instance
