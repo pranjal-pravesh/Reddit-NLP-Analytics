@@ -27,8 +27,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const sentimentScore = document.getElementById('sentiment-score');
     const sentimentExplanation = document.getElementById('sentiment-explanation');
     
+    // Bulk Analysis Dashboard Elements
+    const bulkAnalysisModal = new bootstrap.Modal(document.getElementById('bulk-analysis-modal'));
+    const bulkSentimentChart = document.getElementById('bulk-sentiment-chart');
+    const bulkKeywordsCloud = document.getElementById('bulk-keywords-cloud');
+    const positiveCount = document.getElementById('positive-count');
+    const negativeCount = document.getElementById('negative-count');
+    const neutralCount = document.getElementById('neutral-count');
+    const totalCount = document.getElementById('total-count');
+    const positivePercentage = document.getElementById('positive-percentage');
+    const negativePercentage = document.getElementById('negative-percentage');
+    const neutralPercentage = document.getElementById('neutral-percentage');
+    
     // Initialize Chart.js
     let sentimentChartInstance = null;
+    let bulkSentimentChartInstance = null;
     
     // Event Listeners
     if (searchForm) {
@@ -153,6 +166,18 @@ document.addEventListener('DOMContentLoaded', function() {
             const createdDate = new Date(post.created_utc * 1000);
             const formattedDate = moment(createdDate).format('MMM D, YYYY h:mm A');
             
+            // Determine if we have sentiment data
+            let sentimentHtml = '';
+            if (post.sentiment) {
+                let sentimentClass = 'neutral';
+                if (post.sentiment.label === 'positive') {
+                    sentimentClass = 'positive';
+                } else if (post.sentiment.label === 'negative') {
+                    sentimentClass = 'negative';
+                }
+                sentimentHtml = `<span class="badge sentiment-${sentimentClass} ms-2">${post.sentiment.label}</span>`;
+            }
+            
             row.innerHTML = `
                 <td>
                     <div class="d-flex align-items-center">
@@ -167,6 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 ${truncateText(post.title, 80)}
                             </a>
                             ${post.is_self ? '<span class="badge bg-secondary ms-1">Self Post</span>' : ''}
+                            ${sentimentHtml}
                         </div>
                     </div>
                 </td>
@@ -269,8 +295,88 @@ document.addEventListener('DOMContentLoaded', function() {
      * Analyze all posts in bulk
      */
     function analyzeAllContent() {
-        // Implement bulk analysis if needed
-        showAlert('Bulk analysis feature is coming soon!', 'info');
+        // Check if we have results to analyze
+        if (!currentResults || currentResults.length === 0) {
+            showAlert('No posts to analyze', 'warning');
+            return;
+        }
+        
+        // Show loading state
+        showAlert('Analyzing all posts, please wait...', 'info');
+        
+        // Extract content from all posts
+        const textsToAnalyze = currentResults.map(post => {
+            return post.selftext ? `${post.title}\n\n${post.selftext}` : post.title;
+        });
+        
+        // Perform batch sentiment analysis
+        fetch(`${apiBaseUrl}/analysis/batch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                operation: "sentiment",
+                texts: textsToAnalyze
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Add sentiment data to posts
+            currentResults.forEach((post, i) => {
+                if (data.results && data.results[i]) {
+                    post.sentiment = data.results[i];
+                }
+            });
+            
+            // Now perform batch keyword extraction
+            return fetch(`${apiBaseUrl}/analysis/batch`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    operation: "keywords",
+                    texts: textsToAnalyze,
+                    params: {
+                        method: "tfidf",
+                        num_keywords: 5
+                    }
+                })
+            });
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Add keyword data to posts
+            currentResults.forEach((post, i) => {
+                if (data.results && data.results[i]) {
+                    post.keywords = data.results[i];
+                }
+            });
+            
+            // Re-display results with sentiment info
+            displayResults(currentResults);
+            
+            // Show dashboard with sentiment and keyword summary
+            displayBulkAnalysisDashboard();
+            
+            // Show success message
+            showAlert('All posts have been analyzed successfully!', 'success');
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert(`Failed to analyze all posts: ${error.message}`, 'danger');
+        });
     }
     
     /**
@@ -455,5 +561,129 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
             .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
             .replace(/^> (.*?)$/gm, '<blockquote>$1</blockquote>');
+    }
+    
+    /**
+     * Display bulk analysis dashboard with sentiment and keyword summary
+     */
+    function displayBulkAnalysisDashboard() {
+        // Count sentiment categories
+        let positive = 0, negative = 0, neutral = 0;
+        let total = currentResults.length;
+        
+        // Collect all keywords for aggregation
+        let allKeywords = [];
+        let keywordFrequency = {};
+        
+        currentResults.forEach(post => {
+            // Count sentiment
+            if (post.sentiment) {
+                if (post.sentiment.label === 'positive') positive++;
+                else if (post.sentiment.label === 'negative') negative++;
+                else neutral++;
+            }
+            
+            // Collect keywords
+            if (post.keywords && post.keywords.keywords) {
+                post.keywords.keywords.forEach((keyword, i) => {
+                    const score = post.keywords.scores[i];
+                    if (!keywordFrequency[keyword]) {
+                        keywordFrequency[keyword] = { count: 1, score: score };
+                    } else {
+                        keywordFrequency[keyword].count++;
+                        keywordFrequency[keyword].score += score;
+                    }
+                });
+            }
+        });
+        
+        // Calculate percentages
+        const posPercentage = Math.round((positive / total) * 100);
+        const negPercentage = Math.round((negative / total) * 100);
+        const neuPercentage = 100 - posPercentage - negPercentage;
+        
+        // Update sentiment summary table
+        positiveCount.textContent = positive;
+        negativeCount.textContent = negative;
+        neutralCount.textContent = neutral;
+        totalCount.textContent = total;
+        
+        positivePercentage.textContent = `${posPercentage}%`;
+        negativePercentage.textContent = `${negPercentage}%`;
+        neutralPercentage.textContent = `${neuPercentage}%`;
+        
+        // Create sentiment chart
+        if (bulkSentimentChartInstance) {
+            bulkSentimentChartInstance.destroy();
+        }
+        
+        bulkSentimentChartInstance = new Chart(bulkSentimentChart, {
+            type: 'doughnut',
+            data: {
+                labels: ['Positive', 'Negative', 'Neutral'],
+                datasets: [{
+                    data: [positive, negative, neutral],
+                    backgroundColor: ['#43a047', '#e53935', '#757575'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        displayColors: false
+                    }
+                }
+            }
+        });
+        
+        // Create merged keyword cloud
+        let sortedKeywords = Object.keys(keywordFrequency).map(keyword => {
+            return {
+                keyword: keyword,
+                count: keywordFrequency[keyword].count,
+                score: keywordFrequency[keyword].score
+            };
+        });
+        
+        // Sort by count (frequency) and then by score
+        sortedKeywords.sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return b.score - a.score;
+        });
+        
+        // Get top 20 keywords
+        const topKeywords = sortedKeywords.slice(0, 20);
+        
+        if (topKeywords.length === 0) {
+            bulkKeywordsCloud.innerHTML = '<p class="text-muted">No significant keywords found across posts.</p>';
+        } else {
+            // Create keyword cloud
+            const maxCount = Math.max(...topKeywords.map(k => k.count));
+            const keywordItems = topKeywords.map(item => {
+                // Calculate size based on frequency (relative to highest frequency)
+                const size = 1 + (item.count / maxCount) * 1.5;
+                const opacity = 0.6 + (item.count / maxCount) * 0.4;
+                return `
+                    <div class="keyword-item d-inline-block m-2" 
+                         style="font-size: ${size}em; opacity: ${opacity};">
+                        ${item.keyword} <small class="text-muted">(${item.count})</small>
+                    </div>
+                `;
+            }).join('');
+            
+            bulkKeywordsCloud.innerHTML = keywordItems;
+        }
+        
+        // Show the modal
+        bulkAnalysisModal.show();
     }
 }); 

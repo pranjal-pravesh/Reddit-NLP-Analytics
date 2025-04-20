@@ -209,6 +209,79 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Bulk Analysis Dashboard Modal -->
+        <div class="modal fade" id="bulk-analysis-modal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title">Bulk Analysis Dashboard</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header bg-light">
+                                        <h5 class="mb-0">Sentiment Distribution</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="bulk-sentiment-chart-container">
+                                            <canvas id="bulk-sentiment-chart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header bg-light">
+                                        <h5 class="mb-0">Sentiment Summary</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                <tr>
+                                                    <td><span class="badge sentiment-positive">Positive</span></td>
+                                                    <td id="positive-count">0</td>
+                                                    <td id="positive-percentage">0%</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><span class="badge sentiment-negative">Negative</span></td>
+                                                    <td id="negative-count">0</td>
+                                                    <td id="negative-percentage">0%</td>
+                                                </tr>
+                                                <tr>
+                                                    <td><span class="badge sentiment-neutral">Neutral</span></td>
+                                                    <td id="neutral-count">0</td>
+                                                    <td id="neutral-percentage">0%</td>
+                                                </tr>
+                                                <tr class="table-light">
+                                                    <td><strong>Total</strong></td>
+                                                    <td id="total-count">0</td>
+                                                    <td>100%</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">Top Keywords</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="bulk-keywords-cloud" class="p-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <footer class="bg-light text-center text-muted p-4 mt-5">
