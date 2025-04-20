@@ -1,0 +1,240 @@
+from typing import Any, Dict, List, Optional, Union
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel
+
+from app.api.v1.schemas.analysis import (
+    BatchAnalysisRequest,
+    BatchAnalysisResponse,
+    KeywordExtractionRequest,
+    KeywordExtractionResponse,
+    LLMKeywordClusterRequest,
+    LLMKeywordClusterResponse,
+    LLMSummaryRequest,
+    LLMSummaryResponse,
+    SentimentAnalysisRequest,
+    SentimentAnalysisResponse,
+    TimeHistogramRequest,
+    TimeHistogramResponse,
+    TopicModelingRequest,
+    TopicModelingResponse,
+)
+from app.core.config import settings
+from app.services.llm_service import LLMProvider, llm_service
+from app.services.nlp_service import nlp_service
+
+router = APIRouter()
+
+
+@router.post("/sentiment", response_model=SentimentAnalysisResponse)
+async def analyze_sentiment(
+    request: SentimentAnalysisRequest = Body(...)
+):
+    """
+    Analyze the sentiment of a text using CardiffNLP's Twitter-RoBERTa model.
+    Returns sentiment label and confidence score.
+    """
+    try:
+        result = nlp_service.analyze_sentiment(request.text)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analyzing sentiment: {str(e)}"
+        )
+
+
+@router.post("/keywords", response_model=KeywordExtractionResponse)
+async def extract_keywords(
+    request: KeywordExtractionRequest = Body(...)
+):
+    """
+    Extract keywords from a list of texts using either TF-IDF or TextRank.
+    Returns keywords and their scores for each input text.
+    """
+    try:
+        results = nlp_service.extract_keywords(
+            texts=request.texts,
+            method=request.method,
+            num_keywords=request.num_keywords
+        )
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error extracting keywords: {str(e)}"
+        )
+
+
+@router.post("/topics", response_model=TopicModelingResponse)
+async def model_topics(
+    request: TopicModelingRequest = Body(...)
+):
+    """
+    Perform topic modeling on a collection of texts using LDA or BERTopic.
+    Returns identified topics and their keywords.
+    """
+    try:
+        result = nlp_service.topic_modeling(
+            texts=request.texts,
+            num_topics=request.num_topics,
+            method=request.method
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error in topic modeling: {str(e)}"
+        )
+
+
+@router.post("/time-histogram", response_model=TimeHistogramResponse)
+async def generate_time_histogram(
+    request: TimeHistogramRequest = Body(...)
+):
+    """
+    Generate a time-based histogram of post frequency.
+    Returns counts, labels, and a base64-encoded plot image.
+    """
+    try:
+        result = nlp_service.generate_time_histogram(
+            timestamps=request.timestamps,
+            interval=request.interval
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating time histogram: {str(e)}"
+        )
+
+
+@router.post("/batch", response_model=BatchAnalysisResponse)
+async def batch_analyze(
+    request: BatchAnalysisRequest = Body(...)
+):
+    """
+    Process multiple texts with the specified analysis operation.
+    Supports sentiment analysis, keyword extraction, and topic modeling.
+    """
+    try:
+        if request.operation == "sentiment":
+            results = [nlp_service.analyze_sentiment(text) for text in request.texts]
+        elif request.operation == "keywords":
+            method = request.params.get("method", "tfidf") if request.params else "tfidf"
+            num_keywords = request.params.get("num_keywords", 10) if request.params else 10
+            results = nlp_service.extract_keywords(
+                texts=request.texts,
+                method=method,
+                num_keywords=num_keywords
+            )
+        elif request.operation == "topics":
+            if len(request.texts) < 5:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Topic modeling requires at least 5 texts"
+                )
+            method = request.params.get("method", "lda") if request.params else "lda"
+            num_topics = request.params.get("num_topics", 5) if request.params else 5
+            result = nlp_service.topic_modeling(
+                texts=request.texts,
+                method=method,
+                num_topics=num_topics
+            )
+            return {"results": [result], "operation": request.operation}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported operation: {request.operation}"
+            )
+            
+        return {"results": results, "operation": request.operation}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error in batch analysis: {str(e)}"
+        )
+
+
+# LLM Integration Endpoints (Optional)
+@router.post("/llm/summarize", response_model=LLMSummaryResponse)
+async def summarize_text(
+    request: LLMSummaryRequest = Body(...)
+):
+    """
+    Generate a concise summary of text using an LLM.
+    Requires LLM integration to be enabled in settings.
+    """
+    if not settings.ENABLE_LLM_INTEGRATION:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM integration is disabled"
+        )
+        
+    try:
+        # Convert string provider to enum if specified
+        provider = None
+        if request.provider:
+            try:
+                provider = LLMProvider(request.provider)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid provider: {request.provider}"
+                )
+        
+        result = await llm_service.summarize_text(
+            text=request.text,
+            provider=provider,
+            max_length=request.max_length
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error summarizing text: {str(e)}"
+        )
+
+
+@router.post("/llm/cluster-keywords", response_model=LLMKeywordClusterResponse)
+async def cluster_keywords(
+    request: LLMKeywordClusterRequest = Body(...)
+):
+    """
+    Cluster keywords into meaningful groups using an LLM.
+    Requires LLM integration to be enabled in settings.
+    """
+    if not settings.ENABLE_LLM_INTEGRATION:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM integration is disabled"
+        )
+        
+    try:
+        # Convert string provider to enum if specified
+        provider = None
+        if request.provider:
+            try:
+                provider = LLMProvider(request.provider)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid provider: {request.provider}"
+                )
+        
+        result = await llm_service.cluster_keywords(
+            keywords=request.keywords,
+            provider=provider
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error clustering keywords: {str(e)}"
+        ) 
