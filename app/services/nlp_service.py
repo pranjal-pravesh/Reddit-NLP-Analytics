@@ -377,7 +377,7 @@ class NLPService:
             max_df=0.95,
             min_df=1,  # Accept terms that appear in just one document
             max_features=200,
-            stop_words=self.stopwords,
+            stop_words=list(self.stopwords),
             ngram_range=(1, 2)  # Include bigrams which can work better for short texts
         )
         
