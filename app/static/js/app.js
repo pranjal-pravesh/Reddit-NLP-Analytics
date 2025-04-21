@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const dashboardContent = document.getElementById('dashboard-content');
     const dashboardSentimentChart = document.getElementById('dashboard-sentiment-chart');
     const dashboardKeywordsCloud = document.getElementById('dashboard-keywords-cloud');
+    const keywordFrequencyChart = document.getElementById('keyword-frequency-chart');
+    const sentimentOverTimeChart = document.getElementById('sentiment-over-time-chart');
     const dashboardPositiveCount = document.getElementById('dashboard-positive-count');
     const dashboardNegativeCount = document.getElementById('dashboard-negative-count');
     const dashboardNeutralCount = document.getElementById('dashboard-neutral-count');
@@ -44,6 +46,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize Chart.js
     let sentimentChartInstance = null;
     let dashboardSentimentChartInstance = null;
+    let keywordFrequencyChartInstance = null;
+    let sentimentOverTimeChartInstance = null;
     
     // Event Listeners
     if (searchForm) {
@@ -727,12 +731,342 @@ document.addEventListener('DOMContentLoaded', function() {
             dashboardKeywordsCloud.innerHTML = keywordItems;
         }
         
+        // Generate and display keyword frequency over time chart
+        if (topKeywords.length > 0) {
+            // Get top 5 keywords for the chart
+            const topKeywordsForChart = topKeywords.slice(0, 5);
+            const keywordFrequencyData = processKeywordFrequencyOverTime(topKeywordsForChart.map(k => k.keyword));
+            displayKeywordFrequencyChart(keywordFrequencyData);
+        }
+        
+        // Generate and display sentiment over time chart
+        const sentimentOverTimeData = processSentimentOverTime();
+        displaySentimentOverTimeChart(sentimentOverTimeData);
+        
         // Show dashboard content, hide loading
         dashboardLoading.style.display = 'none';
         dashboardContent.style.display = 'block';
         
         // Scroll to dashboard when content is ready
         dashboardContainer.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    /**
+     * Process keyword frequency over time data
+     * @param {Array} keywords - List of keywords to track
+     * @returns {Object} Processed data for chart
+     */
+    function processKeywordFrequencyOverTime(keywords) {
+        if (!currentResults || currentResults.length === 0 || !keywords || keywords.length === 0) {
+            return null;
+        }
+        
+        // Determine the appropriate time interval based on the date range
+        const timestamps = currentResults.map(post => post.created_utc * 1000);
+        const oldestPostTime = Math.min(...timestamps);
+        const newestPostTime = Math.max(...timestamps);
+        const timeRangeInDays = (newestPostTime - oldestPostTime) / (1000 * 60 * 60 * 24);
+        
+        // Choose interval based on time range
+        let interval;
+        let intervalFormat;
+        
+        if (timeRangeInDays <= 1) {
+            interval = 'hour';
+            intervalFormat = 'HH:mm';
+        } else if (timeRangeInDays <= 7) {
+            interval = 'day';
+            intervalFormat = 'MMM D';
+        } else if (timeRangeInDays <= 30) {
+            interval = 'day';
+            intervalFormat = 'MMM D';
+        } else {
+            interval = 'month';
+            intervalFormat = 'MMM YYYY';
+        }
+        
+        // Group posts by time interval
+        const postsByTimeInterval = {};
+        
+        // Create all time intervals between oldest and newest to ensure no gaps
+        if (interval === 'hour') {
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setMinutes(0, 0, 0); // Round to hour
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}-${String(currentTime.getDate()).padStart(2, '0')} ${String(currentTime.getHours()).padStart(2, '0')}:00`;
+                postsByTimeInterval[timeKey] = [];
+                
+                currentTime.setHours(currentTime.getHours() + 1);
+            }
+        } else if (interval === 'day') {
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setHours(0, 0, 0, 0); // Round to day
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}-${String(currentTime.getDate()).padStart(2, '0')}`;
+                postsByTimeInterval[timeKey] = [];
+                
+                currentTime.setDate(currentTime.getDate() + 1);
+            }
+        } else { // month
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setDate(1);
+            currentTime.setHours(0, 0, 0, 0); // Round to month
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}`;
+                postsByTimeInterval[timeKey] = [];
+                
+                currentTime.setMonth(currentTime.getMonth() + 1);
+            }
+        }
+        
+        // Add posts to their respective time intervals
+        currentResults.forEach(post => {
+            const postDate = new Date(post.created_utc * 1000);
+            let timeKey;
+            
+            if (interval === 'hour') {
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}-${String(postDate.getDate()).padStart(2, '0')} ${String(postDate.getHours()).padStart(2, '0')}:00`;
+            } else if (interval === 'day') {
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}-${String(postDate.getDate()).padStart(2, '0')}`;
+            } else { // month
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}`;
+            }
+            
+            if (postsByTimeInterval[timeKey]) {
+                postsByTimeInterval[timeKey].push(post);
+            }
+        });
+        
+        // Sort time intervals
+        const sortedTimeIntervals = Object.keys(postsByTimeInterval).sort();
+        
+        // Process keyword frequency for each time interval
+        const keywordFrequencyByTime = {};
+        keywords.forEach(keyword => {
+            keywordFrequencyByTime[keyword] = [];
+        });
+        
+        sortedTimeIntervals.forEach(timeInterval => {
+            const postsInInterval = postsByTimeInterval[timeInterval];
+            
+            // Count keyword occurrences in this time interval
+            const keywordCounts = {};
+            keywords.forEach(keyword => {
+                keywordCounts[keyword] = 0;
+            });
+            
+            postsInInterval.forEach(post => {
+                // Check for keywords in title and selftext
+                const postContent = post.selftext ? `${post.title.toLowerCase()} ${post.selftext.toLowerCase()}` : post.title.toLowerCase();
+                
+                keywords.forEach(keyword => {
+                    if (postContent.includes(keyword.toLowerCase())) {
+                        keywordCounts[keyword]++;
+                    }
+                });
+                
+                // Also check if the post has extracted keywords
+                if (post.keywords && post.keywords.keywords) {
+                    const extractedKeywords = post.keywords.keywords.map(k => k.toLowerCase());
+                    
+                    keywords.forEach(keyword => {
+                        if (extractedKeywords.includes(keyword.toLowerCase())) {
+                            // Increment if not already counted from content
+                            if (postContent.includes(keyword.toLowerCase()) === false) {
+                                keywordCounts[keyword]++;
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Format display label based on interval
+            const dateObj = new Date(timeInterval.replace(' ', 'T'));
+            const displayLabel = moment(dateObj).format(intervalFormat);
+            
+            // Add counts to the result
+            keywords.forEach(keyword => {
+                keywordFrequencyByTime[keyword].push({
+                    timeInterval: timeInterval,
+                    displayLabel: displayLabel,
+                    count: keywordCounts[keyword]
+                });
+            });
+        });
+        
+        return {
+            timeIntervals: sortedTimeIntervals.map(interval => {
+                const dateObj = new Date(interval.replace(' ', 'T'));
+                return moment(dateObj).format(intervalFormat);
+            }),
+            keywordData: keywordFrequencyByTime,
+            interval: interval
+        };
+    }
+    
+    /**
+     * Display keyword frequency over time chart
+     * @param {Object} data - Processed keyword frequency data
+     */
+    function displayKeywordFrequencyChart(data) {
+        if (!data || !data.timeIntervals || data.timeIntervals.length === 0) {
+            // If no valid data, display a message
+            const container = document.getElementById('keyword-frequency-chart-container');
+            if (container) {
+                container.innerHTML = '<div class="text-center p-5 text-muted">No time-based data available for keywords</div>';
+            }
+            return;
+        }
+        
+        // Check if we have any non-zero values to plot
+        let hasData = false;
+        for (const keyword in data.keywordData) {
+            if (data.keywordData[keyword].some(item => item.count > 0)) {
+                hasData = true;
+                break;
+            }
+        }
+        
+        if (!hasData) {
+            // If all values are zero, display a message
+            const container = document.getElementById('keyword-frequency-chart-container');
+            if (container) {
+                container.innerHTML = '<div class="text-center p-5 text-muted">No keyword occurrences found in the time period</div>';
+            }
+            return;
+        }
+        
+        // Make sure the chart container has the canvas element
+        const container = document.getElementById('keyword-frequency-chart-container');
+        if (!document.getElementById('keyword-frequency-chart')) {
+            container.innerHTML = '<canvas id="keyword-frequency-chart"></canvas>';
+        }
+        
+        // Destroy previous chart instance if it exists
+        if (keywordFrequencyChartInstance) {
+            keywordFrequencyChartInstance.destroy();
+        }
+        
+        // Prepare datasets for Chart.js
+        const datasets = [];
+        const colors = [
+            'rgba(66, 133, 244, 0.7)',   // Blue
+            'rgba(219, 68, 55, 0.7)',    // Red
+            'rgba(244, 180, 0, 0.7)',    // Yellow
+            'rgba(15, 157, 88, 0.7)',    // Green
+            'rgba(171, 71, 188, 0.7)'    // Purple
+        ];
+        
+        let colorIndex = 0;
+        for (const keyword in data.keywordData) {
+            const keywordData = data.keywordData[keyword];
+            
+            datasets.push({
+                label: keyword,
+                data: keywordData.map(item => item.count),
+                borderColor: colors[colorIndex % colors.length],
+                backgroundColor: colors[colorIndex % colors.length].replace('0.7', '0.1'),
+                borderWidth: 2,
+                tension: 0.3,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                fill: false
+            });
+            
+            colorIndex++;
+        }
+        
+        // Get the chart context
+        const ctx = document.getElementById('keyword-frequency-chart').getContext('2d');
+        
+        // Create chart with animation
+        keywordFrequencyChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.timeIntervals,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 1000,
+                    easing: 'easeOutQuart'
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0,
+                            stepSize: 1
+                        },
+                        title: {
+                            display: true,
+                            text: 'Occurrences',
+                            font: {
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.05)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: data.interval === 'hour' ? 'Hour' : (data.interval === 'day' ? 'Day' : 'Month'),
+                            font: {
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        padding: 10,
+                        cornerRadius: 4,
+                        titleFont: {
+                            size: 14
+                        },
+                        bodyFont: {
+                            size: 13
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            boxWidth: 12,
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    title: {
+                        display: false
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                },
+                elements: {
+                    line: {
+                        tension: 0.4
+                    }
+                }
+            }
+        });
+        
+        console.log('Keyword frequency chart created with data:', data);
     }
     
     /**
@@ -771,5 +1105,301 @@ document.addEventListener('DOMContentLoaded', function() {
             .slice(0, 10); // Get top 10 keywords
             
         return sortedWords;
+    }
+    
+    /**
+     * Process sentiment data over time
+     * @returns {Object} Processed data for sentiment over time chart
+     */
+    function processSentimentOverTime() {
+        if (!currentResults || currentResults.length === 0) {
+            return null;
+        }
+        
+        // Determine the appropriate time interval based on the date range
+        const timestamps = currentResults.map(post => post.created_utc * 1000);
+        const oldestPostTime = Math.min(...timestamps);
+        const newestPostTime = Math.max(...timestamps);
+        const timeRangeInDays = (newestPostTime - oldestPostTime) / (1000 * 60 * 60 * 24);
+        
+        // Choose interval based on time range
+        let interval;
+        let intervalFormat;
+        
+        if (timeRangeInDays <= 1) {
+            interval = 'hour';
+            intervalFormat = 'HH:mm';
+        } else if (timeRangeInDays <= 7) {
+            interval = 'day';
+            intervalFormat = 'MMM D';
+        } else if (timeRangeInDays <= 30) {
+            interval = 'day';
+            intervalFormat = 'MMM D';
+        } else {
+            interval = 'month';
+            intervalFormat = 'MMM YYYY';
+        }
+        
+        // Initialize time intervals
+        const postsByTimeInterval = {};
+        
+        // Create all time intervals between oldest and newest to ensure no gaps
+        if (interval === 'hour') {
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setMinutes(0, 0, 0); // Round to hour
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}-${String(currentTime.getDate()).padStart(2, '0')} ${String(currentTime.getHours()).padStart(2, '0')}:00`;
+                postsByTimeInterval[timeKey] = {
+                    positive: 0,
+                    negative: 0,
+                    neutral: 0
+                };
+                
+                currentTime.setHours(currentTime.getHours() + 1);
+            }
+        } else if (interval === 'day') {
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setHours(0, 0, 0, 0); // Round to day
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}-${String(currentTime.getDate()).padStart(2, '0')}`;
+                postsByTimeInterval[timeKey] = {
+                    positive: 0,
+                    negative: 0,
+                    neutral: 0
+                };
+                
+                currentTime.setDate(currentTime.getDate() + 1);
+            }
+        } else { // month
+            let currentTime = new Date(oldestPostTime);
+            currentTime.setDate(1);
+            currentTime.setHours(0, 0, 0, 0); // Round to month
+            
+            while (currentTime.getTime() <= newestPostTime) {
+                const timeKey = `${currentTime.getFullYear()}-${String(currentTime.getMonth() + 1).padStart(2, '0')}`;
+                postsByTimeInterval[timeKey] = {
+                    positive: 0,
+                    negative: 0,
+                    neutral: 0
+                };
+                
+                currentTime.setMonth(currentTime.getMonth() + 1);
+            }
+        }
+        
+        // Count sentiments for each time interval
+        currentResults.forEach(post => {
+            if (!post.sentiment) return; // Skip posts without sentiment analysis
+            
+            const postDate = new Date(post.created_utc * 1000);
+            let timeKey;
+            
+            if (interval === 'hour') {
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}-${String(postDate.getDate()).padStart(2, '0')} ${String(postDate.getHours()).padStart(2, '0')}:00`;
+            } else if (interval === 'day') {
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}-${String(postDate.getDate()).padStart(2, '0')}`;
+            } else { // month
+                timeKey = `${postDate.getFullYear()}-${String(postDate.getMonth() + 1).padStart(2, '0')}`;
+            }
+            
+            if (postsByTimeInterval[timeKey]) {
+                if (post.sentiment.label === 'positive') {
+                    postsByTimeInterval[timeKey].positive++;
+                } else if (post.sentiment.label === 'negative') {
+                    postsByTimeInterval[timeKey].negative++;
+                } else {
+                    postsByTimeInterval[timeKey].neutral++;
+                }
+            }
+        });
+        
+        // Sort time intervals
+        const sortedTimeIntervals = Object.keys(postsByTimeInterval).sort();
+        
+        // Prepare data for chart
+        const positiveData = [];
+        const negativeData = [];
+        const neutralData = [];
+        const timeLabels = [];
+        
+        sortedTimeIntervals.forEach(interval => {
+            const dateObj = new Date(interval.replace(' ', 'T'));
+            timeLabels.push(moment(dateObj).format(intervalFormat));
+            
+            positiveData.push(postsByTimeInterval[interval].positive);
+            negativeData.push(postsByTimeInterval[interval].negative);
+            neutralData.push(postsByTimeInterval[interval].neutral);
+        });
+        
+        return {
+            timeLabels: timeLabels,
+            positiveData: positiveData,
+            negativeData: negativeData,
+            neutralData: neutralData,
+            interval: interval
+        };
+    }
+    
+    /**
+     * Display sentiment over time chart
+     * @param {Object} data - Processed sentiment over time data
+     */
+    function displaySentimentOverTimeChart(data) {
+        if (!data || !data.timeLabels || data.timeLabels.length === 0) {
+            // If no valid data, display a message
+            const container = document.getElementById('sentiment-over-time-chart-container');
+            if (container) {
+                container.innerHTML = '<div class="text-center p-5 text-muted">No time-based sentiment data available</div>';
+            }
+            return;
+        }
+        
+        // Check if we have any non-zero values to plot
+        const hasData = data.positiveData.some(val => val > 0) || 
+                        data.negativeData.some(val => val > 0) || 
+                        data.neutralData.some(val => val > 0);
+        
+        if (!hasData) {
+            // If all values are zero, display a message
+            const container = document.getElementById('sentiment-over-time-chart-container');
+            if (container) {
+                container.innerHTML = '<div class="text-center p-5 text-muted">No sentiment data found in the time period</div>';
+            }
+            return;
+        }
+        
+        // Make sure the chart container has the canvas element
+        const container = document.getElementById('sentiment-over-time-chart-container');
+        if (!document.getElementById('sentiment-over-time-chart')) {
+            container.innerHTML = '<canvas id="sentiment-over-time-chart"></canvas>';
+        }
+        
+        // Destroy previous chart instance if it exists
+        if (sentimentOverTimeChartInstance) {
+            sentimentOverTimeChartInstance.destroy();
+        }
+        
+        // Get the chart context
+        const ctx = document.getElementById('sentiment-over-time-chart').getContext('2d');
+        
+        // Create chart with animation
+        sentimentOverTimeChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.timeLabels,
+                datasets: [
+                    {
+                        label: 'Positive',
+                        data: data.positiveData,
+                        borderColor: 'rgba(67, 160, 71, 0.8)',
+                        backgroundColor: 'rgba(67, 160, 71, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        fill: false
+                    },
+                    {
+                        label: 'Negative',
+                        data: data.negativeData,
+                        borderColor: 'rgba(229, 57, 53, 0.8)',
+                        backgroundColor: 'rgba(229, 57, 53, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        fill: false
+                    },
+                    {
+                        label: 'Neutral',
+                        data: data.neutralData,
+                        borderColor: 'rgba(117, 117, 117, 0.8)',
+                        backgroundColor: 'rgba(117, 117, 117, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 1000,
+                    easing: 'easeOutQuart'
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        stacked: false,
+                        ticks: {
+                            precision: 0,
+                            stepSize: 1
+                        },
+                        title: {
+                            display: true,
+                            text: 'Number of Posts',
+                            font: {
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.05)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: data.interval === 'hour' ? 'Hour' : (data.interval === 'day' ? 'Day' : 'Month'),
+                            font: {
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        padding: 10,
+                        cornerRadius: 4,
+                        titleFont: {
+                            size: 14
+                        },
+                        bodyFont: {
+                            size: 13
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            boxWidth: 12,
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                },
+                elements: {
+                    line: {
+                        tension: 0.4
+                    }
+                }
+            }
+        });
+        
+        console.log('Sentiment over time chart created with data:', data);
     }
 }); 
