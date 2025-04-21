@@ -280,4 +280,18 @@ footer {
 /* Analysis charts */
 #sentiment-chart, #keywords-chart, #time-chart, #topics-chart, #subreddit-chart, #sentiment-pie-chart {
     max-width: 100%;
+}
+
+/* Add styles for pagination button */
+.pagination-button {
+    position: relative;
+    z-index: 1000;
+    margin: 20px 0;
+    padding: 12px;
+    font-weight: bold;
+    border-width: 2px;
+}
+
+.d-none {
+    display: none !important;
 } 

@@ -82,7 +82,7 @@
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="limit" class="form-label">Limit</label>
-                                    <input type="number" class="form-control" id="limit" value="20" min="5" max="100">
+                                    <input type="number" class="form-control" id="limit" value="20" min="5" max="10000">
                                 </div>
                             </div>
                             <div class="d-grid">
@@ -225,6 +225,10 @@
                                     <!-- Results will be populated here -->
                                 </tbody>
                             </table>
+                        </div>
+                        <!-- Pagination: Load more results -->
+                        <div class="d-grid mt-3">
+                            <button id="load-more-btn" class="btn btn-outline-primary btn-lg pagination-button">Load More Posts</button>
                         </div>
                         <div id="no-results-message" class="text-center p-4" style="display: none;">
                             <i class="bi bi-exclamation-circle text-warning" style="font-size: 3rem;"></i>

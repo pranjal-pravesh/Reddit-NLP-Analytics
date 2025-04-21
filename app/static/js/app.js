@@ -49,6 +49,16 @@ document.addEventListener('DOMContentLoaded', function() {
     let keywordFrequencyChartInstance = null;
     let sentimentOverTimeChartInstance = null;
     
+    // Pagination state and controls
+    let currentPage = 1;
+    const pageSize = 10;  // Display just 10 posts per "page" for better pagination
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    
+    // Ensure load more button is configured properly when the page loads
+    if (loadMoreBtn) {
+        loadMoreBtn.style.zIndex = "1000";  // Ensure it's above other content
+    }
+    
     // Event Listeners
     if (searchForm) {
         searchForm.addEventListener('submit', handleSearch);
@@ -73,7 +83,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const searchQuery = document.getElementById('search-query').value.trim();
         const timeFilter = document.getElementById('time-filter').value;
         const sortBy = document.getElementById('sort-by').value;
-        const limit = document.getElementById('limit').value;
+        // Get the full limit - we'll fetch all posts at once but display in batches
+        const limit = parseInt(document.getElementById('limit').value);
         
         // Validate form
         if (!searchQuery) {
@@ -94,7 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         subreddit: searchQuery,
                         sort: sortBy,
                         time_filter: timeFilter,
-                        limit: parseInt(limit)
+                        limit: limit
                     };
                     break;
                     
@@ -104,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         username: searchQuery,
                         sort: sortBy,
                         time_filter: timeFilter,
-                        limit: parseInt(limit)
+                        limit: limit
                     };
                     break;
                     
@@ -114,7 +125,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         query: searchQuery,
                         sort: sortBy,
                         time_filter: timeFilter,
-                        limit: parseInt(limit)
+                        limit: limit
                     };
                     break;
             }
@@ -162,62 +173,33 @@ document.addEventListener('DOMContentLoaded', function() {
             resultsTable.style.display = 'none';
             noResultsMessage.style.display = 'block';
             analyzeAllBtn.style.display = 'none';
-            dashboardContainer.style.display = 'none'; // Hide dashboard if no results
+            dashboardContainer.style.display = 'none';
+            loadMoreBtn.classList.add('d-none');
             return;
         }
         
         resultsTable.style.display = 'table';
         noResultsMessage.style.display = 'none';
-        analyzeAllBtn.style.display = 'none'; // Hide the analyze all button since it's automatic
+        analyzeAllBtn.style.display = 'none';
         
-        // Create table rows
-        results.forEach((post, index) => {
-            const row = document.createElement('tr');
-            
-            // Format timestamp
-            const createdDate = new Date(post.created_utc * 1000);
-            const formattedDate = moment(createdDate).format('MMM D, YYYY h:mm A');
-            
-            // Determine if we have sentiment data
-            let sentimentHtml = '';
-            if (post.sentiment) {
-                let sentimentClass = 'neutral';
-                if (post.sentiment.label === 'positive') {
-                    sentimentClass = 'positive';
-                } else if (post.sentiment.label === 'negative') {
-                    sentimentClass = 'negative';
-                }
-                sentimentHtml = `<span class="badge sentiment-${sentimentClass} ms-2">${post.sentiment.label}</span>`;
-            }
-            
-            row.innerHTML = `
-                <td>
-                    <div class="d-flex align-items-center">
-                        ${post.thumbnail && post.thumbnail !== 'self' && post.thumbnail !== 'default' ? 
-                            `<img src="${post.thumbnail}" class="me-2" style="width: 60px; height: 40px; object-fit: cover; border-radius: 4px;" alt="Thumbnail">` : 
-                            `<div class="me-2 text-center" style="width: 60px; height: 40px; background: #eee; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
-                                <i class="bi bi-card-text text-muted"></i>
-                            </div>`
-                        }
-                        <div>
-                            <a href="${post.url}" target="_blank" class="fw-bold text-decoration-none">
-                                ${truncateText(post.title, 80)}
-                            </a>
-                            ${post.is_self ? '<span class="badge bg-secondary ms-1">Self Post</span>' : ''}
-                            ${sentimentHtml}
-                        </div>
-                    </div>
-                </td>
-                <td>r/${post.subreddit}</td>
-                <td>u/${post.author}</td>
-                <td title="${formattedDate}">${moment(createdDate).fromNow()}</td>
-                <td>${post.score} <i class="bi bi-arrow-up-short text-muted"></i></td>
-            `;
-            
-            resultsTbody.appendChild(row);
+        // Setup pagination
+        currentResults = results;
+        currentPage = 1;
+        // Display first page of posts
+        const pagePosts = results.slice(0, pageSize);
+        pagePosts.forEach((post, index) => {
+            appendPostRow(post);
         });
         
-        // No need to scroll to results here since dashboard will be shown above
+        // Show or hide Load More button
+        if (results.length > pageSize) {
+            // Show the button when we have more posts than shown on first page
+            loadMoreBtn.classList.remove('d-none');
+            // Make sure the button is really visible (debugging)
+            console.log("Load more button should be visible now - total posts:", results.length, "showing first", pageSize);
+        } else {
+            loadMoreBtn.classList.add('d-none');
+        }
     }
     
     /**
@@ -541,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     function resetSearchButton() {
         searchBtn.disabled = false;
-        searchBtn.innerHTML = '<i class="bi bi-search me-2"></i>Fetch Data';
+        searchBtn.innerHTML = '<i class="bi bi-search me-2"></i>Analyse Posts';
     }
     
     /**
@@ -1401,5 +1383,64 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         console.log('Sentiment over time chart created with data:', data);
+    }
+    
+    // Helper to append a single post row
+    function appendPostRow(post) {
+        const row = document.createElement('tr');
+        const createdDate = new Date(post.created_utc * 1000);
+        const formattedDate = moment(createdDate).format('MMM D, YYYY h:mm A');
+        let sentimentHtml = '';
+        if (post.sentiment) {
+            let cls = 'neutral';
+            if (post.sentiment.label === 'positive') cls = 'positive';
+            else if (post.sentiment.label === 'negative') cls = 'negative';
+            sentimentHtml = `<span class="badge sentiment-${cls} ms-2">${post.sentiment.label}</span>`;
+        }
+        row.innerHTML = `
+            <td>
+                <div class="d-flex align-items-center">
+                    ${post.thumbnail && post.thumbnail !== 'self' && post.thumbnail !== 'default' ?
+                        `<img src="${post.thumbnail}" class="me-2" style="width:60px;height:40px;object-fit:cover;border-radius:4px;">` :
+                        `<div class="me-2" style="width:60px;height:40px;background:#eee;border-radius:4px;display:flex;align-items:center;justify-content:center;">
+                            <i class="bi bi-card-text text-muted"></i>
+                        </div>`
+                    }
+                    <div>
+                        <a href="${post.url}" target="_blank" class="fw-bold text-decoration-none">
+                            ${truncateText(post.title, 80)}
+                        </a>
+                        ${post.is_self ? '<span class="badge bg-secondary ms-1">Self Post</span>' : ''}
+                        ${sentimentHtml}
+                    </div>
+                </div>
+            </td>
+            <td>r/${post.subreddit}</td>
+            <td>u/${post.author}</td>
+            <td title="${formattedDate}">${moment(createdDate).fromNow()}</td>
+            <td>${post.score} <i class="bi bi-arrow-up-short text-muted"></i></td>
+        `;
+        resultsTbody.appendChild(row);
+    }
+
+    // Load more button handler
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', () => {
+            console.log(`Loading more posts - page ${currentPage+1}, starting at post ${currentPage * pageSize}`);
+            const start = currentPage * pageSize;
+            const slice = currentResults.slice(start, start + pageSize);
+            slice.forEach(post => appendPostRow(post));
+            currentPage++;
+            
+            // Update button visibility based on remaining posts
+            if (currentPage * pageSize >= currentResults.length) {
+                loadMoreBtn.classList.add('d-none');
+                console.log("No more posts to load - hiding button");
+            } else {
+                // Log how many more posts are available
+                const remaining = currentResults.length - (currentPage * pageSize);
+                console.log(`Still have ${remaining} more posts available after this page`);
+            }
+        });
     }
 }); 
