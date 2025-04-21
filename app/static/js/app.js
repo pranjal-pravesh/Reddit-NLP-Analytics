@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (fallbackKeywords.length > 0) {
                     const keywordItems = fallbackKeywords.map((item, i) => {
                         // Calculate size based on frequency (higher index = less frequent)
-                        const size = 1.5 - (i * 0.05);
+                        const size = 0.75 - (i * 0.025); // Reduced by half from 1.5 and 0.05
                         return `
                             <div class="keyword-item" style="font-size: ${size}em;">
                                 ${item.keyword} <small class="text-muted">(generated)</small>
@@ -492,7 +492,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const score = data.scores && data.scores[i] ? data.scores[i] : 0.5;
             // Calculate size based on score (relative to highest score)
             const maxScore = Math.max(...(data.scores || [0.5]));
-            const size = 1 + (score / maxScore) * 1.5;
+            const size = 0.5 + (score / maxScore) * 0.75; // Reduced by half from 1 and 1.5
             return `
                 <div class="keyword-item" style="font-size: ${size}em;">
                     ${keyword}
@@ -714,7 +714,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const maxCount = Math.max(...topKeywords.map(k => k.count));
             const keywordItems = topKeywords.map(item => {
                 // Calculate size based on frequency (relative to highest frequency)
-                const size = 1 + (item.count / maxCount) * 1.5;
+                const size = 0.5 + (item.count / maxCount) * 0.75; // Reduced by half from 1 and 1.5
                 const opacity = 0.6 + (item.count / maxCount) * 0.4;
                 return `
                     <div class="keyword-item d-inline-block m-2" 

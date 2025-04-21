@@ -57,19 +57,19 @@ def get_reddit_sort(
     sort: str = Query(
         "hot",
         description="Sort method for Reddit results",
-        regex="^(hot|new|top|rising|controversial|relevance)$"
+        regex="^(hot|new|top|rising|controversial|relevance|comments)$"
     )
 ):
     """
     Validate and return Reddit sort parameter.
     
     Args:
-        sort: Reddit sort method (hot, new, top, rising, controversial, relevance)
+        sort: Reddit sort method (hot, new, top, rising, controversial, relevance, comments)
         
     Returns:
         Validated sort string
     """
-    valid_sorts = ["hot", "new", "top", "rising", "controversial", "relevance"]
+    valid_sorts = ["hot", "new", "top", "rising", "controversial", "relevance", "comments"]
     if sort not in valid_sorts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

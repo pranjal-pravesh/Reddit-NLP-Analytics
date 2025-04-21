@@ -11,7 +11,7 @@ class RedditSearchParams(BaseModel):
     
     @validator("sort")
     def validate_sort(cls, v):
-        valid_sorts = ["relevance", "hot", "new", "top", "rising", "controversial"]
+        valid_sorts = ["relevance", "hot", "new", "top", "rising", "controversial", "comments"]
         if v not in valid_sorts:
             raise ValueError(f"Invalid sort. Must be one of: {', '.join(valid_sorts)}")
         return v
@@ -89,7 +89,7 @@ class RedditSearchRequest(BaseModel):
     
     @validator("sort")
     def validate_sort(cls, v):
-        valid_sorts = ["relevance", "hot", "new", "top", "rising", "controversial"]
+        valid_sorts = ["relevance", "hot", "new", "top", "rising", "controversial", "comments"]
         if v not in valid_sorts:
             raise ValueError(f"Invalid sort. Must be one of: {', '.join(valid_sorts)}")
         return v
@@ -111,7 +111,7 @@ class SubredditRequest(BaseModel):
     
     @validator("sort")
     def validate_subreddit_sort(cls, v):
-        valid_sorts = ["hot", "new", "top", "rising", "controversial"]
+        valid_sorts = ["hot", "new", "top", "rising", "controversial", "comments"]
         if v not in valid_sorts:
             raise ValueError(f"Invalid sort. Must be one of: {', '.join(valid_sorts)}")
         return v
@@ -133,7 +133,7 @@ class UserRequest(BaseModel):
     
     @validator("sort")
     def validate_user_sort(cls, v):
-        valid_sorts = ["hot", "new", "top", "controversial"]
+        valid_sorts = ["hot", "new", "top", "controversial", "comments"]
         if v not in valid_sorts:
             raise ValueError(f"Invalid sort. Must be one of: {', '.join(valid_sorts)}")
         return v

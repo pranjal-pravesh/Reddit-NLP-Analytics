@@ -207,19 +207,43 @@ class RedditClient:
             
             # Perform search
             if subreddit_obj:
-                search_results = subreddit_obj.search(
-                    query, sort=sort, time_filter=timeframe, limit=total_limit
-                )
+                if sort == "comments":
+                    # For comments sort, we need to get all posts and sort by num_comments
+                    search_results = subreddit_obj.search(
+                        query, sort="relevance", time_filter=timeframe, limit=total_limit * 2
+                    )
+                    all_results = list(search_results)
+                    # Sort by number of comments
+                    all_results.sort(key=lambda x: x.num_comments, reverse=True)
+                    # Apply pagination
+                    paginated_results = all_results[skip:skip+limit]
+                else:
+                    search_results = subreddit_obj.search(
+                        query, sort=sort, time_filter=timeframe, limit=total_limit
+                    )
+                    # Process results (need to use a list since we can't reuse the iterator)
+                    all_results = list(search_results)
+                    # Apply pagination
+                    paginated_results = all_results[skip:skip+limit]
             else:
-                search_results = self.reddit.subreddit("all").search(
-                    query, sort=sort, time_filter=timeframe, limit=total_limit
-                )
-            
-            # Process results (need to use a list since we can't reuse the iterator)
-            all_results = list(search_results)
-            
-            # Apply pagination
-            paginated_results = all_results[skip:skip+limit]
+                if sort == "comments":
+                    # For comments sort, we need to get all posts and sort by num_comments
+                    search_results = self.reddit.subreddit("all").search(
+                        query, sort="relevance", time_filter=timeframe, limit=total_limit * 2
+                    )
+                    all_results = list(search_results)
+                    # Sort by number of comments
+                    all_results.sort(key=lambda x: x.num_comments, reverse=True)
+                    # Apply pagination
+                    paginated_results = all_results[skip:skip+limit]
+                else:
+                    search_results = self.reddit.subreddit("all").search(
+                        query, sort=sort, time_filter=timeframe, limit=total_limit
+                    )
+                    # Process results (need to use a list since we can't reuse the iterator)
+                    all_results = list(search_results)
+                    # Apply pagination
+                    paginated_results = all_results[skip:skip+limit]
             
             for post in paginated_results:
                 results.append(self._format_post(post))
@@ -259,11 +283,14 @@ class RedditClient:
         else:
             url = f"{base_url}/search.json"
         
+        # For comments sort, we need to get more results to sort by comments
+        actual_limit = limit * 2 if sort == "comments" else limit
+        
         params = {
             "q": query,
-            "sort": sort,
+            "sort": "relevance" if sort == "comments" else sort,
             "t": timeframe,
-            "limit": limit,
+            "limit": actual_limit,
             "count": skip,
             "raw_json": 1
         }
@@ -276,6 +303,12 @@ class RedditClient:
                 
                 data = await response.json()
                 posts = data.get("data", {}).get("children", [])
+                
+                # If sorting by comments, sort the posts by num_comments
+                if sort == "comments":
+                    posts.sort(key=lambda x: x.get("data", {}).get("num_comments", 0), reverse=True)
+                    # Apply pagination after sorting
+                    posts = posts[skip:skip+limit]
                 
                 results = []
                 for post in posts:
@@ -339,7 +372,7 @@ class RedditClient:
         
         Args:
             subreddit: Subreddit name
-            sort: Sort method (hot, new, top, rising, controversial)
+            sort: Sort method (hot, new, top, rising, controversial, comments)
             timeframe: Time period (hour, day, week, month, year, all)
             limit: Maximum number of results to return
         
@@ -363,6 +396,13 @@ class RedditClient:
                     posts = subreddit_obj.rising(limit=limit)
                 elif sort == "controversial":
                     posts = subreddit_obj.controversial(time_filter=timeframe, limit=limit)
+                elif sort == "comments":
+                    # For comments sort, we need to get all posts and sort by num_comments
+                    posts = list(subreddit_obj.hot(limit=limit * 2))
+                    # Sort by number of comments
+                    posts.sort(key=lambda x: x.num_comments, reverse=True)
+                    # Apply limit
+                    posts = posts[:limit]
                 else:
                     raise ValueError(f"Invalid sort method: {sort}")
                 
@@ -385,10 +425,15 @@ class RedditClient:
         else:
             # Construct the URL for unauthenticated access
             base_url = f"https://www.reddit.com/r/{subreddit}"
-            url = f"{base_url}/{sort}.json"
+            
+            # For comments sort, we need to get more results to sort by comments
+            actual_limit = limit * 2 if sort == "comments" else limit
+            actual_sort = "hot" if sort == "comments" else sort
+            
+            url = f"{base_url}/{actual_sort}.json"
             
             params = {
-                "limit": limit,
+                "limit": actual_limit,
                 "t": timeframe,
                 "raw_json": 1
             }
@@ -401,6 +446,12 @@ class RedditClient:
                     
                     data = await response.json()
                     posts = data.get("data", {}).get("children", [])
+                    
+                    # If sorting by comments, sort the posts by num_comments
+                    if sort == "comments":
+                        posts.sort(key=lambda x: x.get("data", {}).get("num_comments", 0), reverse=True)
+                        # Apply limit after sorting
+                        posts = posts[:limit]
                     
                     results = []
                     for post in posts:
@@ -445,7 +496,7 @@ class RedditClient:
         
         Args:
             username: Reddit username
-            sort: Sort method (hot, new, top, controversial)
+            sort: Sort method (hot, new, top, controversial, comments)
             timeframe: Time period (hour, day, week, month, year, all)
             limit: Maximum number of results to return
         
@@ -467,6 +518,13 @@ class RedditClient:
                     posts = user.submissions.top(time_filter=timeframe, limit=limit)
                 elif sort == "controversial":
                     posts = user.submissions.controversial(time_filter=timeframe, limit=limit)
+                elif sort == "comments":
+                    # For comments sort, we need to get all posts and sort by num_comments
+                    posts = list(user.submissions.new(limit=limit * 2))
+                    # Sort by number of comments
+                    posts.sort(key=lambda x: x.num_comments, reverse=True)
+                    # Apply limit
+                    posts = posts[:limit]
                 else:
                     raise ValueError(f"Invalid sort method: {sort}")
                 
@@ -489,11 +547,16 @@ class RedditClient:
         else:
             # Construct the URL for unauthenticated access
             base_url = f"https://www.reddit.com/user/{username}"
+            
+            # For comments sort, we need to get more results to sort by comments
+            actual_limit = limit * 2 if sort == "comments" else limit
+            actual_sort = "new" if sort == "comments" else sort
+            
             url = f"{base_url}/submitted.json"
             
             params = {
-                "limit": limit,
-                "sort": sort,
+                "limit": actual_limit,
+                "sort": actual_sort,
                 "t": timeframe,
                 "raw_json": 1
             }
@@ -506,6 +569,12 @@ class RedditClient:
                     
                     data = await response.json()
                     posts = data.get("data", {}).get("children", [])
+                    
+                    # If sorting by comments, sort the posts by num_comments
+                    if sort == "comments":
+                        posts.sort(key=lambda x: x.get("data", {}).get("num_comments", 0), reverse=True)
+                        # Apply limit after sorting
+                        posts = posts[:limit]
                     
                     results = []
                     for post in posts:
