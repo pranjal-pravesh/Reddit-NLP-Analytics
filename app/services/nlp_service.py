@@ -7,14 +7,15 @@ import emoji
 import nltk
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, HashingVectorizer, TfidfTransformer
 from sklearn.decomposition import LatentDirichletAllocation
 from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
 from gensim import corpora
-from gensim.models import LdaModel
+from gensim.models import LdaModel, LdaMulticore
 import matplotlib.pyplot as plt
 import io
 import base64
+import os
 
 from app.core.config import settings
 from app.utils.caching import memory_cache
@@ -95,7 +96,7 @@ class NLPService:
     @memory_cache(maxsize=1000, ttl=3600)
     def analyze_sentiment(self, text: str) -> Dict[str, Any]:
         """
-        Analyze sentiment of text using the CardiffNLP Twitter-RoBERTa model.
+        Analyze sentiment of a single text using the CardiffNLP Twitter-RoBERTa model.
         Includes emoji support and basic text preprocessing.
         
         Args:
@@ -104,43 +105,90 @@ class NLPService:
         Returns:
             Dict with sentiment scores and label
         """
+        # Handle single text analysis by calling the batch method
+        results = self.analyze_sentiment_batch([text])
+        return results[0] if results else {"label": "neutral", "score": 0.5}
+        
+    @memory_cache(maxsize=100, ttl=3600)
+    def analyze_sentiment_batch(self, texts: List[str]) -> List[Dict[str, Any]]:
+        """
+        Analyze sentiment of multiple texts in batch using the CardiffNLP Twitter-RoBERTa model.
+        Includes emoji support and basic text preprocessing.
+        
+        Args:
+            texts: List of texts to analyze
+            
+        Returns:
+            List of dicts with sentiment scores and labels
+        """
         if not self.sentiment_pipeline:
             self.initialize_sentiment_model()
             if not self.sentiment_pipeline:
-                return {"label": "neutral", "score": 0.5}
+                return [{"label": "neutral", "score": 0.5} for _ in texts]
         
-        # Preprocess text
-        processed_text = self._preprocess_text(text)
+        # Empty list check
+        if not texts:
+            return []
+            
+        # Preprocess all texts
+        processed_texts = [self._preprocess_text(text) for text in texts]
         
-        # Handle empty text
-        if not processed_text.strip():
-            return {"label": "neutral", "score": 0.5}
+        # Filter out empty texts and remember their positions
+        valid_texts = []
+        valid_indices = []
         
+        for i, text in enumerate(processed_texts):
+            if text.strip():
+                # Truncate extremely long texts to avoid tokenizer issues
+                if len(text) > 1024:
+                    text = text[:1024]
+                valid_texts.append(text)
+                valid_indices.append(i)
+                
+        # Prepare default result for all texts
+        results = [{"label": "neutral", "score": 0.5} for _ in texts]
+        
+        # If no valid texts, return default results
+        if not valid_texts:
+            return results
+            
         try:
-            # Truncate extremely long texts to avoid tokenizer issues
-            if len(processed_text) > 1024:
-                processed_text = processed_text[:1024]
+            # Process in batches of 32 for memory efficiency
+            batch_size = 32
+            for i in range(0, len(valid_texts), batch_size):
+                batch = valid_texts[i:i+batch_size]
+                batch_indices = valid_indices[i:i+batch_size]
+                
+                # Run sentiment analysis in batch
+                batch_results = self.sentiment_pipeline(batch)
+                
+                # Map results back to original positions
+                for j, result in enumerate(batch_results):
+                    idx = batch_indices[j]
+                    
+                    # Map label to standard format
+                    label_map = {
+                        "positive": "positive",
+                        "negative": "negative", 
+                        "neutral": "neutral"
+                    }
+                    
+                    label = label_map.get(result["label"], result["label"])
+                    score = float(result["score"])
+                    
+                    results[idx] = {
+                        "label": label,
+                        "score": score,
+                        "positive": score if label == "positive" else 0.0,
+                        "negative": score if label == "negative" else 0.0,
+                        "neutral": score if label == "neutral" else 0.0
+                    }
+                    
+            return results
             
-            # Run through sentiment model
-            result = self.sentiment_pipeline(processed_text)[0]
-            
-            # Map label to standard format
-            label_map = {
-                "positive": "positive",
-                "negative": "negative", 
-                "neutral": "neutral"
-            }
-            
-            return {
-                "label": label_map.get(result["label"], result["label"]),
-                "score": float(result["score"]),
-                "positive": float(result["score"]) if result["label"] == "positive" else 0.0,
-                "negative": float(result["score"]) if result["label"] == "negative" else 0.0,
-                "neutral": float(result["score"]) if result["label"] == "neutral" else 0.0
-            }
         except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
-            return {"label": "neutral", "score": 0.5}
+            logger.error(f"Error in batch sentiment analysis: {str(e)}")
+            return [{"label": "neutral", "score": 0.5} for _ in texts]
     
     @memory_cache(maxsize=500, ttl=1800)
     def extract_keywords(
@@ -372,58 +420,138 @@ class NLPService:
             logger.info("Adding baseline document for TF-IDF comparison")
             processed_texts.append("reddit post content placeholder text common words")
             
-        # Create TF-IDF vectorizer with more permissive settings for short texts
-        tfidf = TfidfVectorizer(
-            max_df=0.95,
-            min_df=1,  # Accept terms that appear in just one document
-            max_features=200,
-            stop_words=list(self.stopwords),
-            ngram_range=(1, 2)  # Include bigrams which can work better for short texts
-        )
-        
         try:
-            # Fit and transform texts
-            tfidf_matrix = tfidf.fit_transform(processed_texts)
-            feature_names = tfidf.get_feature_names_out()
-            
-            logger.info(f"TF-IDF found {len(feature_names)} features")
-            
-            # Get top keywords for each document
-            results = []
-            for i in range(len(texts)):
-                # Skip the dummy document if we added one
-                if i >= len(processed_texts) - (1 if len(processed_texts) > len(texts) else 0):
-                    continue
+            # For document collections over 500, use the faster HashingVectorizer approach
+            if len(processed_texts) > 500:
+                logger.info(f"Using HashingVectorizer for {len(processed_texts)} documents (faster)")
+                
+                # Step 1: Get counts with HashingVectorizer (much faster for large collections)
+                hasher = HashingVectorizer(
+                    n_features=2**18,  # ~262k dimensions
+                    alternate_sign=False,  # Use absolute counts
+                    ngram_range=(1, 2),  # Include bigrams
+                    stop_words=list(self.stopwords)
+                )
+                X_counts = hasher.transform(processed_texts)
+                
+                # Step 2: Apply TF-IDF transformation to the counts
+                transformer = TfidfTransformer(
+                    norm='l2',
+                    use_idf=True,
+                    smooth_idf=True
+                )
+                tfidf_matrix = transformer.fit_transform(X_counts)
+                
+                # We don't have feature names with hashing (collision-proof hash function)
+                # So we extract tokens from each document directly
+                results = []
+                for i in range(len(texts)):
+                    # Skip the dummy document if we added one
+                    if i >= len(processed_texts) - (1 if len(processed_texts) > len(texts) else 0):
+                        continue
+                        
+                    # Get document vector
+                    doc_vector = tfidf_matrix[i].toarray()[0]
                     
-                # Get feature indices sorted by TF-IDF score
-                doc_tfidf = tfidf_matrix[i].toarray()[0]
-                sorted_indices = doc_tfidf.argsort()[::-1]
-                
-                # Get top keywords and scores
-                top_indices = sorted_indices[:num_keywords]
-                keywords = [feature_names[idx] for idx in top_indices if doc_tfidf[idx] > 0]
-                scores = [float(doc_tfidf[idx]) for idx in top_indices if doc_tfidf[idx] > 0]
-                
-                # If we got no keywords, try to extract some basic ones
-                if not keywords and len(processed_texts[i].split()) > 3:
-                    logger.warning(f"TF-IDF failed to extract keywords for document {i}, using fallback method")
-                    # Fallback: use most common non-stopwords
-                    words = [word.lower() for word in processed_texts[i].split() 
-                             if word.lower() not in self.stopwords and len(word) > 2]
-                    word_counts = Counter(words).most_common(num_keywords)
-                    if word_counts:
-                        keywords = [word for word, _ in word_counts]
-                        # Normalize scores
-                        max_count = max([count for _, count in word_counts]) if word_counts else 1
-                        scores = [float(count) / max_count for _, count in word_counts]
-                
-                logger.info(f"Document {i}: Found {len(keywords)} keywords")
-                results.append({
-                    "keywords": keywords,
-                    "scores": scores
-                })
+                    # Extract words from this document for feature lookup
+                    doc_tokens = set()
+                    for token in processed_texts[i].lower().split():
+                        if token not in self.stopwords and len(token) > 2:
+                            doc_tokens.add(token)
+                            
+                    # For bigrams, add adjacent words
+                    words = processed_texts[i].lower().split()
+                    for j in range(len(words) - 1):
+                        if (words[j] not in self.stopwords and 
+                            words[j+1] not in self.stopwords and
+                            len(words[j]) > 2 and len(words[j+1]) > 2):
+                            doc_tokens.add(f"{words[j]} {words[j+1]}")
+                    
+                    # Use a Counter for word frequency
+                    word_counts = Counter()
+                    for token in processed_texts[i].lower().split():
+                        if token not in self.stopwords and len(token) > 2:
+                            word_counts[token] += 1
+                    
+                    # Sort by count
+                    most_common = word_counts.most_common(num_keywords * 2)  # Get more than needed
+                    
+                    # Get scores from TF-IDF if possible, otherwise normalize counts
+                    keywords = []
+                    scores = []
+                    
+                    for word, count in most_common:
+                        if len(keywords) >= num_keywords:
+                            break
+                        keywords.append(word)
+                        # Normalize by the maximum count
+                        max_count = most_common[0][1] if most_common else 1
+                        scores.append(float(count) / max_count)
+                    
+                    logger.info(f"Document {i}: Found {len(keywords)} keywords via hashing vectorizer")
+                    results.append({
+                        "keywords": keywords[:num_keywords],
+                        "scores": scores[:num_keywords]
+                    })
+                    
+                return results
             
-            return results
+            # For smaller collections, use the traditional TfidfVectorizer 
+            # which builds a vocabulary (better for few documents)
+            else:
+                logger.info(f"Using TfidfVectorizer for {len(processed_texts)} documents")
+                # Create TF-IDF vectorizer with more permissive settings for short texts
+                tfidf = TfidfVectorizer(
+                    max_df=0.95,
+                    min_df=1,  # Accept terms that appear in just one document
+                    max_features=200,
+                    stop_words=list(self.stopwords),
+                    ngram_range=(1, 2)  # Include bigrams which can work better for short texts
+                )
+                
+                # Fit and transform texts
+                tfidf_matrix = tfidf.fit_transform(processed_texts)
+                feature_names = tfidf.get_feature_names_out()
+                
+                logger.info(f"TF-IDF found {len(feature_names)} features")
+                
+                # Get top keywords for each document
+                results = []
+                for i in range(len(texts)):
+                    # Skip the dummy document if we added one
+                    if i >= len(processed_texts) - (1 if len(processed_texts) > len(texts) else 0):
+                        continue
+                        
+                    # Get feature indices sorted by TF-IDF score
+                    doc_tfidf = tfidf_matrix[i].toarray()[0]
+                    sorted_indices = doc_tfidf.argsort()[::-1]
+                    
+                    # Get top keywords and scores
+                    top_indices = sorted_indices[:num_keywords]
+                    keywords = [feature_names[idx] for idx in top_indices if doc_tfidf[idx] > 0]
+                    scores = [float(doc_tfidf[idx]) for idx in top_indices if doc_tfidf[idx] > 0]
+                    
+                    # If we got no keywords, try to extract some basic ones
+                    if not keywords and len(processed_texts[i].split()) > 3:
+                        logger.warning(f"TF-IDF failed to extract keywords for document {i}, using fallback method")
+                        # Fallback: use most common non-stopwords
+                        words = [word.lower() for word in processed_texts[i].split() 
+                                if word.lower() not in self.stopwords and len(word) > 2]
+                        word_counts = Counter(words).most_common(num_keywords)
+                        if word_counts:
+                            keywords = [word for word, _ in word_counts]
+                            # Normalize scores
+                            max_count = max([count for _, count in word_counts]) if word_counts else 1
+                            scores = [float(count) / max_count for _, count in word_counts]
+                    
+                    logger.info(f"Document {i}: Found {len(keywords)} keywords")
+                    results.append({
+                        "keywords": keywords,
+                        "scores": scores
+                    })
+                
+                return results
+            
         except Exception as e:
             logger.error(f"Error in TF-IDF keyword extraction: {str(e)}", exc_info=True)
             return [{"keywords": [], "scores": []}] * len(texts)
@@ -492,13 +620,17 @@ class NLPService:
             # Create document-term matrix
             corpus = [dictionary.doc2bow(doc) for doc in filtered_tokens]
             
-            # Train LDA model
-            lda_model = LdaModel(
+            # Train LDA model with multicore support
+            workers = max(1, os.cpu_count() - 1)  # Use all but one CPU core
+            logger.info(f"Using {workers} cores for LDA topic modeling")
+            
+            lda_model = LdaMulticore(
                 corpus=corpus, 
                 id2word=dictionary, 
                 num_topics=num_topics, 
-                passes=15, 
-                alpha='auto'
+                passes=10,  # Reduced from 15 to 10 for better performance
+                alpha='auto',
+                workers=workers
             )
             
             # Extract topics

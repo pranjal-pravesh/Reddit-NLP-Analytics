@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', function() {
     /**
      * Analyze all posts in bulk
      */
-    function analyzeAllContent() {
+    async function analyzeAllContent() {
         // Check if we have results to analyze
         if (!currentResults || currentResults.length === 0) {
             showAlert('No posts to analyze', 'warning');
@@ -297,62 +297,112 @@ document.addEventListener('DOMContentLoaded', function() {
             return post.selftext ? `${post.title}\n\n${post.selftext}` : post.title;
         });
         
-        // Perform batch sentiment analysis
-        fetch(`${apiBaseUrl}/analysis/batch`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                operation: "sentiment",
-                texts: textsToAnalyze
-            })
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Add sentiment data to posts
-            currentResults.forEach((post, i) => {
-                if (data.results && data.results[i]) {
-                    post.sentiment = data.results[i];
-                }
-            });
+        // Get timestamps for time-based analysis
+        const timestamps = currentResults.map(post => post.created_utc);
+        
+        try {
+            // Define all API requests to run in parallel
+            const [sentimentData, keywordsData, timeHistogramData] = await Promise.all([
+                // 1. Sentiment analysis
+                fetch(`${apiBaseUrl}/analysis/batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        operation: "sentiment",
+                        texts: textsToAnalyze
+                    })
+                }).then(response => {
+                    if (!response.ok) throw new Error(`Sentiment API error: ${response.status}`);
+                    return response.json();
+                }),
+                
+                // 2. Keyword extraction
+                fetch(`${apiBaseUrl}/analysis/batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        operation: "keywords",
+                        texts: textsToAnalyze,
+                        params: {
+                            method: "hybrid",
+                            num_keywords: 5
+                        }
+                    })
+                }).then(response => {
+                    if (!response.ok) throw new Error(`Keywords API error: ${response.status}`);
+                    return response.json();
+                }),
+                
+                // 3. Time histogram (only if we have more than 5 posts)
+                currentResults.length >= 5 ? 
+                fetch(`${apiBaseUrl}/analysis/time-histogram`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timestamps: timestamps,
+                        interval: timestamps.length > 50 ? "day" : "hour"
+                    })
+                }).then(response => {
+                    if (!response.ok) throw new Error(`Time histogram API error: ${response.status}`);
+                    return response.json();
+                }) : Promise.resolve(null)
+            ]);
             
-            // Now perform batch keyword extraction
-            return fetch(`${apiBaseUrl}/analysis/batch`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    operation: "keywords",
-                    texts: textsToAnalyze,
-                    params: {
-                        method: "hybrid",
-                        num_keywords: 5
+            // Optional: Run topic modeling only for larger datasets (20+ posts)
+            // This is done separately as it's more intensive and not always needed
+            let topicData = null;
+            if (currentResults.length >= 20) {
+                try {
+                    const topicResponse = await fetch(`${apiBaseUrl}/analysis/topics`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            texts: textsToAnalyze,
+                            num_topics: 3,
+                            method: "lda"
+                        })
+                    });
+                    
+                    if (topicResponse.ok) {
+                        topicData = await topicResponse.json();
                     }
-                })
-            });
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Add keyword data to posts
-            currentResults.forEach((post, i) => {
-                if (data.results && data.results[i]) {
-                    post.keywords = data.results[i];
+                } catch (topicError) {
+                    console.warn('Topic modeling skipped:', topicError);
+                    // Non-critical, continue without topics
                 }
-            });
+            }
             
-            // Re-display results with sentiment info
+            // Process and apply the results
+            
+            // 1. Add sentiment data to posts
+            if (sentimentData && sentimentData.results) {
+                currentResults.forEach((post, i) => {
+                    if (sentimentData.results[i]) {
+                        post.sentiment = sentimentData.results[i];
+                    }
+                });
+            }
+            
+            // 2. Add keyword data to posts
+            if (keywordsData && keywordsData.results) {
+                currentResults.forEach((post, i) => {
+                    if (keywordsData.results[i]) {
+                        post.keywords = keywordsData.results[i];
+                    }
+                });
+            }
+            
+            // 3. Store time histogram data if available
+            if (timeHistogramData) {
+                currentTimeHistogram = timeHistogramData;
+            }
+            
+            // 4. Store topic data if available
+            if (topicData) {
+                currentTopics = topicData;
+            }
+            
+            // Re-display results with all the new data
             displayResults(currentResults);
             
             // Show dashboard with sentiment and keyword summary
@@ -360,13 +410,13 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Show success message
             showAlert('All posts have been analyzed successfully!', 'success');
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showAlert(`Failed to analyze all posts: ${error.message}`, 'danger');
+            
+        } catch (error) {
+            console.error('Error in analysis:', error);
+            showAlert(`Failed to analyze posts: ${error.message}`, 'danger');
             // Hide loading spinner on error
             dashboardLoading.style.display = 'none';
-        });
+        }
     }
     
     /**

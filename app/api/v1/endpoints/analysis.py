@@ -45,6 +45,33 @@ async def analyze_sentiment(
         )
 
 
+@router.post("/sentiment-batch", response_model=List[Dict[str, Any]])
+async def analyze_sentiment_batch(
+    request: dict = Body(...)
+):
+    """
+    Analyze the sentiment of multiple texts in a single request.
+    Much more efficient than multiple individual calls.
+    Returns list of sentiment analysis results.
+    """
+    try:
+        if "texts" not in request or not isinstance(request["texts"], list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Request must include a 'texts' field containing a list of strings"
+            )
+            
+        results = nlp_service.analyze_sentiment_batch(request["texts"])
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analyzing sentiments in batch: {str(e)}"
+        )
+
+
 @router.post("/keywords", response_model=KeywordExtractionResponse)
 async def extract_keywords(
     request: KeywordExtractionRequest = Body(...)
@@ -151,7 +178,7 @@ async def batch_analyze(
     """
     try:
         if request.operation == "sentiment":
-            results = [nlp_service.analyze_sentiment(text) for text in request.texts]
+            results = nlp_service.analyze_sentiment_batch(request.texts)
         elif request.operation == "keywords":
             method = request.params.get("method", "tfidf") if request.params else "tfidf"
             num_keywords = request.params.get("num_keywords", 10) if request.params else 10
