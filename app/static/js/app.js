@@ -281,6 +281,10 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
+        // Performance tracking
+        const analysisStartTime = performance.now();
+        console.log(`Starting analysis of ${currentResults.length} posts`);
+        
         // Show loading state for the inline dashboard
         dashboardContainer.style.display = 'block';
         dashboardLoading.style.display = 'block';
@@ -300,59 +304,97 @@ document.addEventListener('DOMContentLoaded', function() {
         // Get timestamps for time-based analysis
         const timestamps = currentResults.map(post => post.created_utc);
         
+        console.log(`Starting parallel API requests for ${currentResults.length} posts`);
+        
         try {
+            const parallelStartTime = performance.now();
+            console.log("OPTIMIZATION ACTIVE: Running API requests in parallel");
+            
             // Define all API requests to run in parallel
             const [sentimentData, keywordsData, timeHistogramData] = await Promise.all([
                 // 1. Sentiment analysis
-                fetch(`${apiBaseUrl}/analysis/batch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        operation: "sentiment",
-                        texts: textsToAnalyze
-                    })
-                }).then(response => {
+                (async () => {
+                    const sentimentStartTime = performance.now();
+                    console.log(`Starting sentiment analysis for ${textsToAnalyze.length} posts`);
+                    
+                    const response = await fetch(`${apiBaseUrl}/analysis/batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            operation: "sentiment",
+                            texts: textsToAnalyze
+                        })
+                    });
+                    
                     if (!response.ok) throw new Error(`Sentiment API error: ${response.status}`);
-                    return response.json();
-                }),
+                    const result = await response.json();
+                    
+                    console.log(`Sentiment analysis completed in ${((performance.now() - sentimentStartTime) / 1000).toFixed(2)} seconds`);
+                    return result;
+                })(),
                 
                 // 2. Keyword extraction
-                fetch(`${apiBaseUrl}/analysis/batch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        operation: "keywords",
-                        texts: textsToAnalyze,
-                        params: {
-                            method: "hybrid",
-                            num_keywords: 5
-                        }
-                    })
-                }).then(response => {
+                (async () => {
+                    const keywordsStartTime = performance.now();
+                    console.log(`Starting keyword extraction for ${textsToAnalyze.length} posts`);
+                    
+                    const response = await fetch(`${apiBaseUrl}/analysis/batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            operation: "keywords",
+                            texts: textsToAnalyze,
+                            params: {
+                                method: "hybrid",
+                                num_keywords: 5
+                            }
+                        })
+                    });
+                    
                     if (!response.ok) throw new Error(`Keywords API error: ${response.status}`);
-                    return response.json();
-                }),
+                    const result = await response.json();
+                    
+                    console.log(`Keyword extraction completed in ${((performance.now() - keywordsStartTime) / 1000).toFixed(2)} seconds`);
+                    return result;
+                })(),
                 
                 // 3. Time histogram (only if we have more than 5 posts)
-                currentResults.length >= 5 ? 
-                fetch(`${apiBaseUrl}/analysis/time-histogram`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        timestamps: timestamps,
-                        interval: timestamps.length > 50 ? "day" : "hour"
-                    })
-                }).then(response => {
+                (async () => {
+                    if (currentResults.length < 5) {
+                        console.log("Skipping time histogram - fewer than 5 posts");
+                        return Promise.resolve(null);
+                    }
+                    
+                    const histogramStartTime = performance.now();
+                    console.log(`Starting time histogram creation for ${timestamps.length} timestamps`);
+                    
+                    const response = await fetch(`${apiBaseUrl}/analysis/time-histogram`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            timestamps: timestamps,
+                            interval: timestamps.length > 50 ? "day" : "hour"
+                        })
+                    });
+                    
                     if (!response.ok) throw new Error(`Time histogram API error: ${response.status}`);
-                    return response.json();
-                }) : Promise.resolve(null)
+                    const result = await response.json();
+                    
+                    console.log(`Time histogram completed in ${((performance.now() - histogramStartTime) / 1000).toFixed(2)} seconds`);
+                    return result;
+                })()
             ]);
+            
+            console.log(`All parallel requests completed in ${((performance.now() - parallelStartTime) / 1000).toFixed(2)} seconds`);
             
             // Optional: Run topic modeling only for larger datasets (20+ posts)
             // This is done separately as it's more intensive and not always needed
             let topicData = null;
             if (currentResults.length >= 20) {
                 try {
+                    const topicStartTime = performance.now();
+                    console.log(`Starting topic modeling for ${textsToAnalyze.length} posts`);
+                    
                     const topicResponse = await fetch(`${apiBaseUrl}/analysis/topics`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -365,6 +407,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     if (topicResponse.ok) {
                         topicData = await topicResponse.json();
+                        console.log(`Topic modeling completed in ${((performance.now() - topicStartTime) / 1000).toFixed(2)} seconds`);
                     }
                 } catch (topicError) {
                     console.warn('Topic modeling skipped:', topicError);
@@ -373,6 +416,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Process and apply the results
+            const processingStartTime = performance.now();
             
             // 1. Add sentiment data to posts
             if (sentimentData && sentimentData.results) {
@@ -402,14 +446,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentTopics = topicData;
             }
             
+            console.log(`Results processing completed in ${((performance.now() - processingStartTime) / 1000).toFixed(2)} seconds`);
+            
             // Re-display results with all the new data
             displayResults(currentResults);
             
             // Show dashboard with sentiment and keyword summary
             displayDashboard();
             
-            // Show success message
-            showAlert('All posts have been analyzed successfully!', 'success');
+            // Show success message and log total time
+            const totalAnalysisTime = (performance.now() - analysisStartTime) / 1000;
+            console.log(`Total analysis pipeline completed in ${totalAnalysisTime.toFixed(2)} seconds for ${currentResults.length} posts (${(currentResults.length/totalAnalysisTime).toFixed(2)} posts/sec)`);
+            
+            showAlert(`Analysis completed in ${totalAnalysisTime.toFixed(1)} seconds!`, 'success');
             
         } catch (error) {
             console.error('Error in analysis:', error);

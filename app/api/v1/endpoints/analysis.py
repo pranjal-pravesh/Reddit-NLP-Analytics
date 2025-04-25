@@ -23,6 +23,10 @@ from app.core.config import settings
 from app.services.llm_service import LLMProvider, llm_service
 from app.services.nlp_service import nlp_service
 from app.utils.logging_config import logger
+import psutil
+import sys
+import os
+from datetime import datetime
 
 router = APIRouter()
 
@@ -168,6 +172,43 @@ async def generate_time_histogram(
         )
 
 
+@router.get("/optimization-status", response_model=Dict[str, Any])
+async def check_optimization_status():
+    """
+    Check the status of various optimizations.
+    Returns details about which optimizations are enabled and active.
+    """
+    try:
+        status = nlp_service.get_optimization_status()
+        
+        # Add memory usage info
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        
+        status["memory_usage_mb"] = memory_info.rss / (1024 * 1024)
+        status["virtual_memory_mb"] = memory_info.vms / (1024 * 1024)
+        
+        # Add timing information from cached properties
+        status["system_info"] = {
+            "platform": sys.platform,
+            "python_version": sys.version,
+            "cpu_count": os.cpu_count(),
+        }
+        
+        return {
+            "status": "ok",
+            "optimizations": status,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking optimization status: {str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 @router.post("/batch", response_model=BatchAnalysisResponse)
 async def batch_analyze(
     request: BatchAnalysisRequest = Body(...)
@@ -176,41 +217,65 @@ async def batch_analyze(
     Process multiple texts with the specified analysis operation.
     Supports sentiment analysis, keyword extraction, and topic modeling.
     """
+    import time
+    start_time = time.time()
+    logger.info(f"Batch analysis request for operation: {request.operation}, {len(request.texts)} texts")
+    
     try:
         if request.operation == "sentiment":
+            # Use the optimized batch sentiment analysis
+            logger.info("Using optimized batch sentiment analysis")
             results = nlp_service.analyze_sentiment_batch(request.texts)
+            
         elif request.operation == "keywords":
             method = request.params.get("method", "tfidf") if request.params else "tfidf"
             num_keywords = request.params.get("num_keywords", 10) if request.params else 10
+            
+            # For large collections, force the hashing vectorizer
+            if len(request.texts) > 500 and method == "tfidf":
+                logger.info(f"Large collection detected ({len(request.texts)} texts): Using tfidf_hash method for better performance")
+                method = "tfidf_hash"
+                
+            logger.info(f"Extracting keywords with method: {method}, num_keywords: {num_keywords}")
             results = nlp_service.extract_keywords(
                 texts=request.texts,
                 method=method,
                 num_keywords=num_keywords
             )
+            
         elif request.operation == "topics":
             if len(request.texts) < 5:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Topic modeling requires at least 5 texts"
                 )
+                
             method = request.params.get("method", "lda") if request.params else "lda"
             num_topics = request.params.get("num_topics", 5) if request.params else 5
+            
+            logger.info(f"Performing topic modeling with method: {method}, num_topics: {num_topics}")
             result = nlp_service.topic_modeling(
                 texts=request.texts,
                 method=method,
                 num_topics=num_topics
             )
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"Batch {request.operation} completed in {elapsed_time:.2f} seconds")
             return {"results": [result], "operation": request.operation}
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported operation: {request.operation}"
             )
-            
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Batch {request.operation} completed in {elapsed_time:.2f} seconds for {len(request.texts)} texts ({len(request.texts)/elapsed_time:.2f} texts/sec)")
         return {"results": results, "operation": request.operation}
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error in batch analysis: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error in batch analysis: {str(e)}"

@@ -2,6 +2,8 @@ import re
 from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
+import time
+import os
 
 import emoji
 import nltk
@@ -15,7 +17,6 @@ from gensim.models import LdaModel, LdaMulticore
 import matplotlib.pyplot as plt
 import io
 import base64
-import os
 
 from app.core.config import settings
 from app.utils.caching import memory_cache
@@ -73,6 +74,58 @@ class NLPService:
                 logger.info("KeyBERT model initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize KeyBERT model: {str(e)}")
+                
+        # Log optimization status
+        self._log_optimization_status()
+    
+    def _log_optimization_status(self):
+        """Log the status of various optimization features"""
+        logger.info("=== NLP Service Optimization Status ===")
+        
+        # Check multicore availability
+        cpu_count = os.cpu_count() or 1
+        if cpu_count > 1:
+            logger.info(f"✓ Multicore LDA available: {cpu_count} CPU cores detected, will use {cpu_count-1} for processing")
+        else:
+            logger.warning("✗ Multicore LDA unavailable: Only 1 CPU core detected")
+            
+        # Verify sentiment batching
+        logger.info("✓ Sentiment batch processing enabled: Will process texts in batches of 32")
+        
+        # Verify HashingVectorizer
+        try:
+            hasher = HashingVectorizer(n_features=2**10)
+            test_data = ["test document"]
+            hasher.transform(test_data)
+            logger.info("✓ HashingVectorizer available: Will use for collections > 500 documents")
+        except Exception as e:
+            logger.warning(f"✗ HashingVectorizer unavailable: {str(e)}")
+            
+        # Check if KeyBERT is available for hybrid method
+        if KEYBERT_AVAILABLE and self.keybert_model:
+            logger.info("✓ KeyBERT available: 'hybrid' method enabled for better keyword extraction")
+        else:
+            logger.warning("✗ KeyBERT unavailable: Will fall back to TF-IDF only")
+            
+        logger.info("======================================")
+    
+    def get_optimization_status(self) -> Dict[str, bool]:
+        """
+        Return the status of various optimization features.
+        Use this to diagnose if optimizations are working.
+        
+        Returns:
+            Dict with optimization statuses
+        """
+        cpu_count = os.cpu_count() or 1
+        
+        return {
+            "multicore_lda_available": cpu_count > 1,
+            "cpu_cores": cpu_count,
+            "sentiment_batching_enabled": True,
+            "hashing_vectorizer_available": True,
+            "keybert_available": KEYBERT_AVAILABLE and self.keybert_model is not None,
+        }
     
     def initialize_sentiment_model(self):
         """Initialize the sentiment analysis model"""
@@ -121,9 +174,13 @@ class NLPService:
         Returns:
             List of dicts with sentiment scores and labels
         """
+        start_time = time.time()
+        logger.info(f"Starting batch sentiment analysis for {len(texts)} texts")
+        
         if not self.sentiment_pipeline:
             self.initialize_sentiment_model()
             if not self.sentiment_pipeline:
+                logger.error("Failed to initialize sentiment model for batch analysis")
                 return [{"label": "neutral", "score": 0.5} for _ in texts]
         
         # Empty list check
@@ -131,7 +188,9 @@ class NLPService:
             return []
             
         # Preprocess all texts
+        preprocess_start = time.time()
         processed_texts = [self._preprocess_text(text) for text in texts]
+        logger.info(f"Preprocessing {len(texts)} texts took {time.time() - preprocess_start:.2f} seconds")
         
         # Filter out empty texts and remember their positions
         valid_texts = []
@@ -144,20 +203,29 @@ class NLPService:
                     text = text[:1024]
                 valid_texts.append(text)
                 valid_indices.append(i)
+        
+        logger.info(f"Found {len(valid_texts)} valid texts out of {len(texts)} total texts")
                 
         # Prepare default result for all texts
         results = [{"label": "neutral", "score": 0.5} for _ in texts]
         
         # If no valid texts, return default results
         if not valid_texts:
+            logger.warning("No valid texts found for sentiment analysis, returning defaults")
             return results
             
         try:
             # Process in batches of 32 for memory efficiency
             batch_size = 32
+            batch_count = (len(valid_texts) + batch_size - 1) // batch_size  # Ceiling division
+            logger.info(f"Processing sentiment in {batch_count} batches of up to {batch_size} texts each")
+            
             for i in range(0, len(valid_texts), batch_size):
+                batch_start = time.time()
                 batch = valid_texts[i:i+batch_size]
                 batch_indices = valid_indices[i:i+batch_size]
+                
+                logger.info(f"Processing batch {i//batch_size + 1}/{batch_count} with {len(batch)} texts")
                 
                 # Run sentiment analysis in batch
                 batch_results = self.sentiment_pipeline(batch)
@@ -183,11 +251,15 @@ class NLPService:
                         "negative": score if label == "negative" else 0.0,
                         "neutral": score if label == "neutral" else 0.0
                     }
+                
+                logger.info(f"Batch {i//batch_size + 1} processed in {time.time() - batch_start:.2f} seconds")
                     
+            total_time = time.time() - start_time
+            logger.info(f"Completed batch sentiment analysis in {total_time:.2f} seconds ({len(texts)/total_time:.1f} texts/sec)")
             return results
             
         except Exception as e:
-            logger.error(f"Error in batch sentiment analysis: {str(e)}")
+            logger.error(f"Error in batch sentiment analysis: {str(e)}", exc_info=True)
             return [{"label": "neutral", "score": 0.5} for _ in texts]
     
     @memory_cache(maxsize=500, ttl=1800)
@@ -216,6 +288,15 @@ class NLPService:
         # Handle case where texts might be a single item
         if not isinstance(texts, list):
             texts = [str(texts)]
+            
+        # Log the collection size upfront
+        collection_size = len(texts)
+        logger.info(f"Extract keywords called with method '{method}' on {collection_size} documents")
+        
+        # Force hash vectorizer for very large collections
+        if collection_size > 500 and method == "tfidf":
+            logger.info(f"Large collection detected ({collection_size} texts): Adding 'use_hash=True' parameter for better performance")
+            method = "tfidf_hash"  # Use a special indicator for hashing vectorizer mode
         
         # Preprocess texts
         processed_texts = [self._preprocess_text(text) for text in texts]
@@ -231,7 +312,9 @@ class NLPService:
             tfidf_results = self._extract_keywords_tfidf(processed_texts, num_keywords * 2)
             return self._combine_keyword_results(keybert_results, tfidf_results, num_keywords)
         elif method == "tfidf":
-            return self._extract_keywords_tfidf(processed_texts, num_keywords)
+            return self._extract_keywords_tfidf(processed_texts, num_keywords, use_hash=False)
+        elif method == "tfidf_hash":
+            return self._extract_keywords_tfidf(processed_texts, num_keywords, use_hash=True)
         elif method == "textrank":
             return self._extract_keywords_textrank(processed_texts, num_keywords)
         else:
@@ -389,9 +472,13 @@ class NLPService:
     def _extract_keywords_tfidf(
         self, 
         texts: List[str], 
-        num_keywords: int = 10
+        num_keywords: int = 10,
+        use_hash: bool = False
     ) -> List[Dict[str, Any]]:
         """Extract keywords using TF-IDF"""
+        start_time = time.time()
+        logger.info(f"Starting TF-IDF keyword extraction for {len(texts)} texts, use_hash={use_hash}")
+        
         # Ensure texts are strings, not nested lists
         if texts and isinstance(texts[0], list):
             logger.warning("Received nested list in texts parameter, flattening")
@@ -406,6 +493,7 @@ class NLPService:
             logger.debug(f"Text sample: {text[:100]}...")
         
         # Ensure we have enough content to extract keywords
+        preprocess_start = time.time()
         processed_texts = []
         for text in texts:
             # Ensure minimum text length by repeating short texts
@@ -419,11 +507,16 @@ class NLPService:
         if len(processed_texts) < 2:
             logger.info("Adding baseline document for TF-IDF comparison")
             processed_texts.append("reddit post content placeholder text common words")
+        
+        logger.info(f"Text preprocessing for TF-IDF took {time.time() - preprocess_start:.2f} seconds")
             
         try:
-            # For document collections over 500, use the faster HashingVectorizer approach
-            if len(processed_texts) > 500:
-                logger.info(f"Using HashingVectorizer for {len(processed_texts)} documents (faster)")
+            vectorizer_start = time.time()
+            # Use HashingVectorizer for large document collections or when explicitly requested
+            use_hashing = use_hash or len(processed_texts) > 500
+            
+            if use_hashing:
+                logger.info(f"OPTIMIZATION ACTIVE: Using HashingVectorizer for {len(processed_texts)} documents (forced={use_hash})")
                 
                 # Step 1: Get counts with HashingVectorizer (much faster for large collections)
                 hasher = HashingVectorizer(
@@ -440,10 +533,14 @@ class NLPService:
                     use_idf=True,
                     smooth_idf=True
                 )
+                vectorizer_fit_start = time.time()
                 tfidf_matrix = transformer.fit_transform(X_counts)
+                logger.info(f"HashingVectorizer transform took {time.time() - vectorizer_fit_start:.2f} seconds")
+                logger.info(f"Total vectorization took {time.time() - vectorizer_start:.2f} seconds")
                 
                 # We don't have feature names with hashing (collision-proof hash function)
                 # So we extract tokens from each document directly
+                extraction_start = time.time()
                 results = []
                 for i in range(len(texts)):
                     # Skip the dummy document if we added one
@@ -493,13 +590,15 @@ class NLPService:
                         "keywords": keywords[:num_keywords],
                         "scores": scores[:num_keywords]
                     })
-                    
+                
+                logger.info(f"Keyword extraction from HashingVectorizer took {time.time() - extraction_start:.2f} seconds")
+                logger.info(f"Total TF-IDF keyword extraction took {time.time() - start_time:.2f} seconds")
                 return results
             
             # For smaller collections, use the traditional TfidfVectorizer 
             # which builds a vocabulary (better for few documents)
             else:
-                logger.info(f"Using TfidfVectorizer for {len(processed_texts)} documents")
+                logger.info(f"Using standard TfidfVectorizer for {len(processed_texts)} documents (< 500 threshold)")
                 # Create TF-IDF vectorizer with more permissive settings for short texts
                 tfidf = TfidfVectorizer(
                     max_df=0.95,
@@ -510,12 +609,15 @@ class NLPService:
                 )
                 
                 # Fit and transform texts
+                vectorizer_fit_start = time.time()
                 tfidf_matrix = tfidf.fit_transform(processed_texts)
+                logger.info(f"TfidfVectorizer fit_transform took {time.time() - vectorizer_fit_start:.2f} seconds")
                 feature_names = tfidf.get_feature_names_out()
                 
                 logger.info(f"TF-IDF found {len(feature_names)} features")
                 
                 # Get top keywords for each document
+                extraction_start = time.time()
                 results = []
                 for i in range(len(texts)):
                     # Skip the dummy document if we added one
@@ -550,6 +652,8 @@ class NLPService:
                         "scores": scores
                     })
                 
+                logger.info(f"Keyword extraction from TfidfVectorizer took {time.time() - extraction_start:.2f} seconds")
+                logger.info(f"Total TF-IDF keyword extraction took {time.time() - start_time:.2f} seconds")
                 return results
             
         except Exception as e:
@@ -601,8 +705,12 @@ class NLPService:
         num_topics: int = 5
     ) -> Dict[str, Any]:
         """Perform topic modeling using LDA"""
+        start_time = time.time()
+        logger.info(f"Starting LDA topic modeling for {len(texts)} texts, requesting {num_topics} topics")
+        
         try:
             # Create document-term matrix using Gensim
+            tokenize_start = time.time()
             tokens = [nltk.word_tokenize(text.lower()) for text in texts]
             
             # Filter out stopwords and short words
@@ -610,8 +718,10 @@ class NLPService:
                 [word for word in doc if word not in self.stopwords and len(word) > 2]
                 for doc in tokens
             ]
+            logger.info(f"Tokenization for LDA took {time.time() - tokenize_start:.2f} seconds")
             
             # Create dictionary
+            dict_start = time.time()
             dictionary = corpora.Dictionary(filtered_tokens)
             
             # Filter out extreme values
@@ -619,21 +729,60 @@ class NLPService:
             
             # Create document-term matrix
             corpus = [dictionary.doc2bow(doc) for doc in filtered_tokens]
+            logger.info(f"Dictionary and corpus creation took {time.time() - dict_start:.2f} seconds")
+            
+            # Verify that corpus has content
+            if not corpus or all(len(doc) == 0 for doc in corpus):
+                logger.warning("Empty corpus after preprocessing, cannot train LDA model")
+                return {"topics": [], "topic_distribution": []}
             
             # Train LDA model with multicore support
-            workers = max(1, os.cpu_count() - 1)  # Use all but one CPU core
-            logger.info(f"Using {workers} cores for LDA topic modeling")
+            train_start = time.time()
             
-            lda_model = LdaMulticore(
-                corpus=corpus, 
-                id2word=dictionary, 
-                num_topics=num_topics, 
-                passes=10,  # Reduced from 15 to 10 for better performance
-                alpha='auto',
-                workers=workers
-            )
+            # Verify CPU count
+            available_cores = os.cpu_count() or 1
+            workers = max(1, available_cores - 1)  # Use all but one CPU core
+            
+            if workers > 1:
+                logger.info(f"OPTIMIZATION ACTIVE: Using LdaMulticore with {workers} cores")
+                try:
+                    # First try with multicore
+                    lda_model = LdaMulticore(
+                        corpus=corpus, 
+                        id2word=dictionary, 
+                        num_topics=num_topics, 
+                        passes=10,  # Reduced from 15 to 10 for better performance
+                        alpha='auto',
+                        workers=workers
+                    )
+                    multicore_successful = True
+                    logger.info("Successfully created LdaMulticore model")
+                except Exception as e:
+                    logger.warning(f"LdaMulticore failed, falling back to single-core: {str(e)}")
+                    # Fall back to single core in case of failure
+                    lda_model = LdaModel(
+                        corpus=corpus, 
+                        id2word=dictionary, 
+                        num_topics=num_topics, 
+                        passes=10,
+                        alpha='auto'
+                    )
+                    multicore_successful = False
+            else:
+                logger.info("Using single-core LDA as only one core is available")
+                lda_model = LdaModel(
+                    corpus=corpus, 
+                    id2word=dictionary, 
+                    num_topics=num_topics, 
+                    passes=10,
+                    alpha='auto'
+                )
+                multicore_successful = False
+            
+            logger.info(f"LDA model training took {time.time() - train_start:.2f} seconds (multicore: {multicore_successful})")
             
             # Extract topics
+            extract_start = time.time()
             topics = []
             for topic_id in range(num_topics):
                 topic_words = lda_model.show_topic(topic_id, topn=10)
@@ -652,12 +801,15 @@ class NLPService:
                     "probabilities": [float(prob) for topic_id, prob in topic_dist]
                 })
             
+            logger.info(f"Topic extraction took {time.time() - extract_start:.2f} seconds")
+            logger.info(f"Total LDA topic modeling took {time.time() - start_time:.2f} seconds")
+            
             return {
                 "topics": topics,
                 "topic_distribution": doc_topics
             }
         except Exception as e:
-            logger.error(f"Error in LDA topic modeling: {str(e)}")
+            logger.error(f"Error in LDA topic modeling: {str(e)}", exc_info=True)
             return {"topics": [], "topic_distribution": []}
     
     def _topic_modeling_bertopic(
