@@ -1,4 +1,4 @@
-# Reddit Analysis API
+# Reddit Analysis
 
 A scalable FastAPI backend for Reddit data retrieval and analysis with NLP capabilities and optional LLM integration.
 
