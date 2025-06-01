@@ -1,4 +1,4 @@
-# Reddit Analysis Platform
+# Reddit Analysis API
 
 A full-stack web application for Reddit data retrieval and analysis with advanced NLP capabilities and optional LLM integration. Features a modern web interface built with FastAPI and interactive data visualization.
 
@@ -377,18 +377,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgements
 
-- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
-- [PRAW](https://praw.readthedocs.io/) - Python Reddit API Wrapper
-- [CardiffNLP](https://github.com/cardiffnlp/tweeteval) - Sentiment analysis models
-- [Hugging Face](https://huggingface.co/) - Transformers and model hub
-- [BERTopic](https://maartengr.github.io/BERTopic/) - Topic modeling library
-
-## 📞 Support
-
-- Create an [Issue](../../issues) for bug reports or feature requests
-- Join our [Discussions](../../discussions) for questions and community support
-- Check the [Wiki](../../wiki) for additional documentation
-
----
-
-Made with ❤️ for the Reddit community 
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [PRAW](https://praw.readthedocs.io/)
+- [CardiffNLP](https://github.com/cardiffnlp/tweeteval)
+- [Hugging Face Transformers](https://huggingface.co/transformers/) 
