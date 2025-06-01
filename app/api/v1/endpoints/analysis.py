@@ -18,6 +18,8 @@ from app.api.v1.schemas.analysis import (
     TimeHistogramResponse,
     TopicModelingRequest,
     TopicModelingResponse,
+    RedditPostAnalysisRequest,
+    RedditPostAnalysisResponse,
 )
 from app.core.config import settings
 from app.services.llm_service import LLMProvider, llm_service
@@ -329,17 +331,10 @@ async def cluster_keywords(
     request: LLMKeywordClusterRequest = Body(...)
 ):
     """
-    Cluster keywords into meaningful groups using an LLM.
-    Requires LLM integration to be enabled in settings.
+    Use LLM to cluster similar keywords and provide a label for each cluster.
     """
-    if not settings.ENABLE_LLM_INTEGRATION:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM integration is disabled"
-        )
-        
     try:
-        # Convert string provider to enum if specified
+        # Convert provider string to enum if specified
         provider = None
         if request.provider:
             try:
@@ -350,15 +345,109 @@ async def cluster_keywords(
                     detail=f"Invalid provider: {request.provider}"
                 )
         
+        # Call LLM service
         result = await llm_service.cluster_keywords(
             keywords=request.keywords,
             provider=provider
         )
+        
+        if "error" in result and result["error"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+            
         return result
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error clustering keywords: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error clustering keywords: {str(e)}"
-        ) 
+        )
+
+
+@router.post("/llm/analyze-reddit-posts", response_model=RedditPostAnalysisResponse)
+async def analyze_reddit_posts(
+    request: RedditPostAnalysisRequest = Body(...)
+):
+    """
+    Use LLM to analyze a collection of Reddit posts and provide insights.
+    Returns an overview of the content, main topics, and useful insights.
+    """
+    try:
+        # Validate inputs
+        if not request.posts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No posts provided for analysis"
+            )
+        
+        # Convert provider string to enum if specified
+        provider = None
+        if request.provider:
+            try:
+                provider = LLMProvider(request.provider)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid provider: {request.provider}"
+                )
+        
+        # Call LLM service
+        result = await llm_service.analyze_reddit_posts(
+            posts=request.posts,
+            subreddit_name=request.subreddit_name,
+            provider=provider,
+            max_posts=request.max_posts
+        )
+        
+        if "error" in result and result["error"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+            
+        return {
+            "overview": result.get("overview", ""),
+            "topics": result.get("topics", []),
+            "insights": result.get("insights", []),
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "error": result.get("error")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing Reddit posts: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analyzing Reddit posts: {str(e)}"
+        )
+
+
+# Memory usage endpoint for monitoring performance
+@router.get("/memory-usage", response_model=Dict[str, Any])
+async def check_memory_usage():
+    """
+    Check the current memory usage of the system.
+    Returns details about the current memory usage.
+    """
+    try:
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        
+        return {
+            "status": "ok",
+            "memory_usage_mb": memory_info.rss / (1024 * 1024),
+            "virtual_memory_mb": memory_info.vms / (1024 * 1024),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking memory usage: {str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "timestamp": datetime.now().isoformat()
+        } 

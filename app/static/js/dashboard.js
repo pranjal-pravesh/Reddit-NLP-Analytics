@@ -18,6 +18,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const topPostsFilter = document.getElementById('top-posts-filter');
     const topPostsTbody = document.getElementById('top-posts-tbody');
     
+    // LLM Analysis Elements
+    const runLlmAnalysisBtn = document.getElementById('run-llm-analysis');
+    const llmProviderSelect = document.getElementById('llm-provider');
+    const llmLoading = document.getElementById('llm-loading');
+    const llmContent = document.getElementById('llm-content');
+    const llmPlaceholder = document.getElementById('llm-placeholder');
+    const llmError = document.getElementById('llm-error');
+    const llmErrorMessage = document.getElementById('llm-error-message');
+    const llmOverview = document.getElementById('llm-overview');
+    const llmTopics = document.getElementById('llm-topics');
+    const llmInsights = document.getElementById('llm-insights');
+    const llmModelInfo = document.getElementById('llm-model-info');
+    
     // Chart Elements
     const timeChart = document.getElementById('time-chart');
     const sentimentPieChart = document.getElementById('sentiment-pie-chart');
@@ -41,6 +54,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (topPostsFilter) {
         topPostsFilter.addEventListener('change', filterTopPosts);
+    }
+    if (runLlmAnalysisBtn) {
+        runLlmAnalysisBtn.addEventListener('click', generateLlmAnalysis);
     }
     
     // Initialize with mock data for demo
@@ -262,12 +278,12 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Create new chart
         sentimentPieChartInstance = new Chart(sentimentPieChart, {
-            type: 'doughnut',
+            type: 'pie',
             data: {
-                labels: ['Positive', 'Negative', 'Neutral'],
+                labels: data.labels,
                 datasets: [{
-                    data: [data.positive, data.negative, data.neutral],
-                    backgroundColor: ['#43a047', '#e53935', '#757575'],
+                    data: data.values,
+                    backgroundColor: data.colors,
                     borderWidth: 1
                 }]
             },
@@ -277,6 +293,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 plugins: {
                     legend: {
                         position: 'right'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+                                const percentage = Math.round((value / total) * 100);
+                                return `${context.label}: ${percentage}% (${value})`;
+                            }
+                        }
                     }
                 }
             }
@@ -426,97 +452,285 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     /**
-     * Initialize dashboard with mock data for demo purposes
+     * Generate LLM analysis for the current data
+     */
+    async function generateLlmAnalysis() {
+        if (!currentData || !currentData.posts || currentData.posts.length === 0) {
+            showLlmError("No data available for analysis. Please load data first.");
+            return;
+        }
+        
+        // Show loading state
+        showLlmLoading();
+        
+        try {
+            // Prepare data for analysis
+            const provider = llmProviderSelect.value || null;
+            const subredditName = currentData.subredditName || null;
+            
+            // Prepare request data
+            const requestData = {
+                posts: currentData.posts,
+                provider: provider,
+                subreddit_name: subredditName,
+                max_posts: Math.min(currentData.posts.length, 500) // Limit to 500 posts
+            };
+            
+            // Make API request
+            const response = await fetch(`${apiBaseUrl}/analysis/llm/analyze-reddit-posts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to generate LLM analysis');
+            }
+            
+            // Process response
+            const data = await response.json();
+            
+            // Display results
+            displayLlmResults(data);
+            
+        } catch (error) {
+            console.error('Error generating LLM analysis:', error);
+            showLlmError(error.message || 'Failed to generate LLM analysis');
+        }
+    }
+    
+    /**
+     * Display LLM analysis results
+     * @param {Object} data - LLM analysis data
+     */
+    function displayLlmResults(data) {
+        // Set overview
+        llmOverview.textContent = data.overview || '';
+        
+        // Set model info
+        let modelInfo = 'Default LLM';
+        if (data.provider && data.model) {
+            modelInfo = `${data.provider} (${data.model})`;
+        }
+        llmModelInfo.textContent = modelInfo;
+        
+        // Clear previous topics and insights
+        llmTopics.innerHTML = '';
+        llmInsights.innerHTML = '';
+        
+        // Add topics
+        if (data.topics && data.topics.length > 0) {
+            data.topics.forEach(topic => {
+                const topicElement = document.createElement('div');
+                topicElement.className = 'list-group-item';
+                topicElement.textContent = topic;
+                llmTopics.appendChild(topicElement);
+            });
+        } else {
+            const noTopics = document.createElement('div');
+            noTopics.className = 'list-group-item text-muted';
+            noTopics.textContent = 'No topics identified';
+            llmTopics.appendChild(noTopics);
+        }
+        
+        // Add insights
+        if (data.insights && data.insights.length > 0) {
+            data.insights.forEach(insight => {
+                const insightElement = document.createElement('div');
+                insightElement.className = 'list-group-item';
+                insightElement.textContent = insight;
+                llmInsights.appendChild(insightElement);
+            });
+        } else {
+            const noInsights = document.createElement('div');
+            noInsights.className = 'list-group-item text-muted';
+            noInsights.textContent = 'No insights provided';
+            llmInsights.appendChild(noInsights);
+        }
+        
+        // Show content
+        showLlmContent();
+    }
+    
+    /**
+     * Show LLM loading state
+     */
+    function showLlmLoading() {
+        llmContent.classList.add('d-none');
+        llmPlaceholder.classList.add('d-none');
+        llmError.classList.add('d-none');
+        llmLoading.classList.remove('d-none');
+    }
+    
+    /**
+     * Show LLM content
+     */
+    function showLlmContent() {
+        llmLoading.classList.add('d-none');
+        llmPlaceholder.classList.add('d-none');
+        llmError.classList.add('d-none');
+        llmContent.classList.remove('d-none');
+    }
+    
+    /**
+     * Show LLM error message
+     * @param {String} message - Error message
+     */
+    function showLlmError(message) {
+        llmLoading.classList.add('d-none');
+        llmContent.classList.add('d-none');
+        llmPlaceholder.classList.add('d-none');
+        
+        llmErrorMessage.textContent = message;
+        llmError.classList.remove('d-none');
+    }
+    
+    /**
+     * Initialize mock data for demonstration
      */
     function initializeMockData() {
+        // Create mock data for visualization
+        const mockPosts = generateMockPosts(100);
+        
+        // Subreddit name for the dataset
+        const subredditName = "programming";
+        
+        // Create dashboard data object
         currentData = {
-            totalPosts: 1254,
-            totalComments: 8763,
-            uniqueAuthors: 876,
-            totalScore: 42589,
-            
+            totalPosts: mockPosts.length,
+            totalComments: mockPosts.reduce((sum, post) => sum + post.num_comments, 0),
+            uniqueAuthors: new Set(mockPosts.map(post => post.author)).size,
+            totalScore: mockPosts.reduce((sum, post) => sum + post.score, 0),
+            posts: mockPosts,
+            subredditName: subredditName,
             timeData: {
-                labels: ['Jan 1', 'Jan 2', 'Jan 3', 'Jan 4', 'Jan 5', 'Jan 6', 'Jan 7', 'Jan 8', 'Jan 9', 'Jan 10'],
-                values: [45, 62, 81, 75, 92, 103, 87, 79, 94, 101]
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+                values: [12, 19, 15, 25, 32, 28, 21, 35, 29]
             },
-            
             sentimentData: {
-                positive: 42,
-                negative: 28,
-                neutral: 30
+                labels: ['Positive', 'Negative', 'Neutral'],
+                values: [45, 25, 30],
+                colors: ['#43a047', '#e53935', '#757575']
             },
-            
             keywordData: {
-                labels: ['Python', 'JavaScript', 'React', 'Vue', 'Angular', 'Node.js', 'Django', 'Flask', 'ML', 'AI'],
-                values: [78, 65, 59, 42, 35, 62, 48, 39, 55, 61]
+                labels: ['javascript', 'python', 'react', 'node.js', 'typescript', 'api', 'mongo', 'database', 'frontend', 'backend'],
+                values: [85, 75, 65, 60, 55, 50, 45, 40, 35, 30]
             },
-            
             topicData: {
-                labels: ['Programming', 'Data Science', 'Web Dev', 'Mobile', 'AI/ML', 'DevOps'],
-                values: [0.85, 0.72, 0.9, 0.65, 0.78, 0.63]
+                labels: ['Web Development', 'Data Science', 'Mobile Apps', 'DevOps', 'Security'],
+                values: [35, 25, 20, 15, 5],
+                colors: ['#1e88e5', '#43a047', '#7e57c2', '#ffa000', '#e53935']
             },
-            
             subredditData: {
-                labels: ['r/programming', 'r/datascience', 'r/webdev', 'r/MachineLearning', 'r/javascript', 'r/Python'],
-                values: [324, 281, 265, 198, 187, 145]
-            },
-            
-            posts: generateMockPosts(50)
+                labels: ['r/programming', 'r/javascript', 'r/python', 'r/webdev', 'r/reactjs', 'r/node', 'r/coding'],
+                values: [30, 25, 20, 15, 5, 3, 2],
+                colors: [
+                    '#1e88e5', '#43a047', '#7e57c2', '#ffa000', 
+                    '#e53935', '#00acc1', '#3949ab'
+                ]
+            }
         };
         
-        // Update dashboard
+        // Update dashboard with mock data
         updateDashboard(currentData);
     }
     
     /**
-     * Generate mock posts for demo
-     * @param {number} count - Number of posts to generate
-     * @returns {Array} Array of post objects
+     * Generate mock posts for demonstration
+     * @param {Number} count - Number of posts to generate
+     * @returns {Array} Array of mock post objects
      */
     function generateMockPosts(count) {
-        const subreddits = ['programming', 'Python', 'javascript', 'webdev', 'datascience', 'MachineLearning'];
+        const posts = [];
+        const subreddits = ['programming', 'javascript', 'python', 'webdev', 'reactjs', 'node', 'coding'];
+        
         const titles = [
-            'Just built my first React app, what do you think?',
-            'How to optimize Python code for better performance',
-            'The future of AI in web development',
-            'Tips for becoming a better programmer',
-            'Why TypeScript is better than JavaScript',
-            'Flask vs Django: Which one should you use?',
-            'Machine Learning for beginners: Where to start',
-            'What programming language should I learn in 2023?',
-            'Building scalable web applications with Node.js',
-            'Data visualization tools every data scientist should know'
+            "How to optimize React performance in large applications",
+            "What's your favorite VS Code extension for web development?",
+            "Python vs JavaScript: Which should I learn first?",
+            "Best practices for API design in 2023",
+            "Dealing with technical debt in a startup environment",
+            "TypeScript is changing the way I write JavaScript - here's why",
+            "Modern authentication methods: JWT vs Session-based",
+            "How I built a real-time chat application with WebSockets",
+            "Lessons learned from scaling a database to handle millions of users",
+            "Why functional programming concepts are important for all developers",
+            "Comparing MongoDB and PostgreSQL for web applications",
+            "The most underrated Node.js libraries you should know about",
+            "Frontend state management in 2023: Redux vs Context API vs Zustand",
+            "How Git changed the way we approach software development",
+            "Microservices vs Monoliths: What's right for your project?",
+            "Containerization with Docker: A beginner's guide",
+            "Testing strategies that actually work in production",
+            "Making sense of CSS Grid and Flexbox layouts",
+            "Python automation scripts that saved me hours of work",
+            "The future of web development: WebAssembly and beyond"
         ];
         
-        const posts = [];
-        const now = Math.floor(Date.now() / 1000);
+        const selfTexts = [
+            "I've been working on optimizing our React application, and wanted to share some techniques that helped us reduce load times by 60%...",
+            "After spending years in the industry, I've learned that robust error handling is the key difference between amateur and professional code...",
+            "I recently switched from using REST APIs to GraphQL and wanted to share my experience and the lessons I learned along the way...",
+            "Security is often overlooked in development. Here are some basic principles every developer should follow to protect user data...",
+            "Working with legacy code can be challenging, but I've developed a systematic approach that makes it more manageable...",
+            "The key to successful testing is not just writing tests, but writing the right kinds of tests that give you confidence in your code...",
+            "Performance optimization isn't just about speed - it's about user experience. Here's how we improved our application's perceived performance...",
+            "I've been experimenting with different state management libraries, and here's my analysis of the pros and cons of each approach...",
+            "Database design decisions can make or break your application. These are the most important principles I follow when designing schemas...",
+            "Accessibility should be built into your development process from the beginning. Here's how we've integrated it into our workflow..."
+        ];
         
+        const authors = ['dev_ninja', 'code_wizard', 'bug_hunter', 'web_guru', 'tech_enthusiast', 'async_await', 'regex_master', 'database_pro', 'ui_designer', 'system_architect'];
+        
+        // Generate random posts
         for (let i = 0; i < count; i++) {
-            const subreddit = subreddits[Math.floor(Math.random() * subreddits.length)];
-            const title = titles[Math.floor(Math.random() * titles.length)];
+            const titleIndex = Math.floor(Math.random() * titles.length);
+            const textIndex = Math.floor(Math.random() * selfTexts.length);
+            const subredditIndex = Math.floor(Math.random() * subreddits.length);
+            const authorIndex = Math.floor(Math.random() * authors.length);
+            
+            // Random creation date within the last month
+            const now = new Date();
+            const randomDaysAgo = Math.floor(Math.random() * 30);
+            const createdDate = new Date(now.getTime() - (randomDaysAgo * 24 * 60 * 60 * 1000));
+            const createdUtc = Math.floor(createdDate.getTime() / 1000);
+            
+            // Random scores and comments
             const score = Math.floor(Math.random() * 5000);
-            const num_comments = Math.floor(Math.random() * 500);
-            const created_utc = now - Math.floor(Math.random() * 30 * 24 * 60 * 60); // Random time in the last 30 days
+            const numComments = Math.floor(Math.random() * 500);
             
-            // Random sentiment
-            const sentimentOptions = ['positive', 'negative', 'neutral'];
-            const sentimentLabel = sentimentOptions[Math.floor(Math.random() * sentimentOptions.length)];
-            const sentimentScore = Math.random() * 0.5 + 0.5; // Random score between 0.5 and 1.0
+            // Generate sentiment
+            let sentiment = null;
+            const randomSentiment = Math.random();
+            if (randomSentiment < 0.33) {
+                sentiment = { label: 'positive', score: 0.7 + (Math.random() * 0.3) };
+            } else if (randomSentiment < 0.66) {
+                sentiment = { label: 'negative', score: 0.7 + (Math.random() * 0.3) };
+            } else {
+                sentiment = { label: 'neutral', score: 0.7 + (Math.random() * 0.3) };
+            }
             
-            posts.push({
-                title,
-                subreddit,
-                author: `user${i + 1}`,
-                score,
-                num_comments,
-                created_utc,
-                url: '#',
-                is_self: Math.random() > 0.5,
-                sentiment: {
-                    label: sentimentLabel,
-                    score: sentimentScore
-                }
-            });
+            // Create post object
+            const post = {
+                id: `t3_${Math.random().toString(36).substring(2, 10)}`,
+                title: titles[titleIndex],
+                selftext: selfTexts[textIndex],
+                author: authors[authorIndex],
+                subreddit: subreddits[subredditIndex],
+                created_utc: createdUtc,
+                score: score,
+                num_comments: numComments,
+                upvote_ratio: 0.7 + (Math.random() * 0.3),
+                url: `https://reddit.com/r/${subreddits[subredditIndex]}/comments/${Math.random().toString(36).substring(2, 10)}`,
+                permalink: `/r/${subreddits[subredditIndex]}/comments/${Math.random().toString(36).substring(2, 10)}`,
+                is_self: true,
+                sentiment: sentiment
+            };
+            
+            posts.push(post);
         }
         
         return posts;

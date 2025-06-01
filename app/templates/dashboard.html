@@ -25,6 +25,9 @@
                         <a class="nav-link active" href="/dashboard"><i class="bi bi-bar-chart me-1"></i>Dashboard</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/llm-analysis"><i class="bi bi-cpu me-1"></i>LLM Analysis</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="/docs" target="_blank"><i class="bi bi-file-earmark-code me-1"></i>API Docs</a>
                     </li>
                 </ul>
@@ -161,6 +164,69 @@
             </div>
         </div>
 
+        <!-- LLM Analysis Section -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-purple text-white d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0"><i class="bi bi-cpu me-2"></i>LLM Analysis</h4>
+                        <div>
+                            <button class="btn btn-light btn-sm" id="run-llm-analysis">
+                                <i class="bi bi-lightning me-1"></i>Generate Analysis
+                            </button>
+                            <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="llm-provider">
+                                <option value="">Default Provider</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="google">Google</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="llm-loading" class="text-center py-5 d-none">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-3">Generating in-depth analysis with LLM...</p>
+                            <p class="text-muted small">This may take a few moments depending on the amount of data</p>
+                        </div>
+                        <div id="llm-content" class="d-none">
+                            <div class="row">
+                                <div class="col-md-12 mb-4">
+                                    <h5 class="border-bottom pb-2 mb-3">Overview</h5>
+                                    <p id="llm-overview"></p>
+                                    <div class="text-muted small">
+                                        Generated using <span id="llm-model-info"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h5 class="border-bottom pb-2 mb-3">Main Topics</h5>
+                                    <div id="llm-topics" class="list-group">
+                                        <!-- Topics will be added here -->
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h5 class="border-bottom pb-2 mb-3">Key Insights</h5>
+                                    <div id="llm-insights" class="list-group">
+                                        <!-- Insights will be added here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="llm-placeholder" class="text-center py-5">
+                            <i class="bi bi-cpu display-1 text-muted"></i>
+                            <p class="mt-3">Click "Generate Analysis" to use LLM for in-depth content analysis</p>
+                            <p class="text-muted small">This will use an AI model to analyze the content and extract insights</p>
+                        </div>
+                        <div id="llm-error" class="alert alert-danger d-none">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            <span id="llm-error-message"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="row mb-4">
             <div class="col-md-12">
                 <div class="card shadow">
@@ -201,7 +267,7 @@
     <footer class="bg-light text-center text-muted p-4 mt-5">
         <div class="container">
             <p>© 2023 Reddit Analysis Platform. All rights reserved.</p>
-            <p class="small">Powered by FastAPI, NLTK, and scikit-learn</p>
+            <p class="small">Powered by FastAPI, NLTK, scikit-learn and LLMs (OpenAI, Anthropic, Google)</p>
         </div>
     </footer>
 

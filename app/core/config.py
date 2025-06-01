@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     REDDIT_USER_AGENT: str = "RedditAnalysisApp/1.0"
     
     # LLM Integration
-    ENABLE_LLM_INTEGRATION: bool = False
+    ENABLE_LLM_INTEGRATION: bool = True
     
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None

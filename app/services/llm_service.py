@@ -419,6 +419,169 @@ ANALYSIS:"""
         result = await self._generate(prompt, provider)
         return result
     
+    async def analyze_reddit_posts(
+        self,
+        posts: List[Dict[str, Any]],
+        subreddit_name: Optional[str] = None,
+        provider: Optional[LLMProvider] = None,
+        max_posts: int = 500
+    ) -> Dict[str, Any]:
+        """
+        Analyze a collection of Reddit posts and provide comprehensive insights.
+        
+        Args:
+            posts: List of Reddit post data
+            subreddit_name: Optional name of the subreddit
+            provider: Specific LLM provider to use (or None for default)
+            max_posts: Maximum number of posts to analyze
+            
+        Returns:
+            Dict with analysis results including overview, topics, and insights
+        """
+        if not self.enabled or not self.clients:
+            return {
+                "overview": "", 
+                "topics": [], 
+                "insights": [],
+                "error": "LLM integration is disabled or no providers available"
+            }
+        
+        # Limit the number of posts
+        posts = posts[:max_posts]
+        
+        # Prepare post content for analysis
+        titles = [post.get('title', '') for post in posts if post.get('title')]
+        titles_text = "\n".join([f"- {title}" for title in titles[:100]])
+        
+        # Create a sample of post content
+        content_samples = []
+        for i, post in enumerate(posts[:50]):
+            if post.get('selftext'):
+                # Truncate long posts
+                selftext = post.get('selftext', '')
+                if len(selftext) > 500:
+                    selftext = selftext[:500] + "..."
+                
+                content_samples.append(f"Post {i+1}: {post.get('title', '')}\n{selftext}\n")
+        
+        content_text = "\n".join(content_samples)
+        
+        # Stats to provide context
+        total_posts = len(posts)
+        avg_score = sum(post.get('score', 0) for post in posts) / total_posts if total_posts else 0
+        avg_comments = sum(post.get('num_comments', 0) for post in posts) / total_posts if total_posts else 0
+        
+        # Create the analysis prompt
+        subreddit_info = f"r/{subreddit_name}" if subreddit_name else "these Reddit posts"
+        
+        prompt = f"""Analyze this collection of {total_posts} Reddit posts from {subreddit_info}.
+
+POST STATISTICS:
+- Total posts analyzed: {total_posts}
+- Average score per post: {avg_score:.1f}
+- Average comments per post: {avg_comments:.1f}
+
+SAMPLE OF POST TITLES:
+{titles_text}
+
+SAMPLE OF POST CONTENT:
+{content_text}
+
+Based on these posts, please provide the following analysis in markdown format:
+
+1) OVERVIEW: A concise overview (50-80 words) of what's happening in these posts - the main themes, patterns, and notable points.
+
+2) TOPICS: A list of the 5-7 main topics of discussion, with a brief description of each topic. Format as a bulleted list using markdown.
+
+3) INSIGHTS: 3-4 valuable insights expressed as one-line statements. Make each insight a single concise sentence that conveys a clear point. Format as a bulleted list using markdown.
+
+Example format:
+```
+**OVERVIEW**
+A concise 50-80 word overview of the content... 
+
+**TOPICS**
+- **Topic 1**: Description of the first major topic
+- **Topic 2**: Description of the second major topic
+- **Topic 3**: Description of the third major topic
+
+**INSIGHTS**
+- First key insight as a single sentence.
+- Second key insight as a single sentence.
+- Third key insight as a single sentence.
+```
+
+Use clear, direct language and focus on the most important patterns and trends.
+"""
+        
+        # Generate the analysis
+        result = await self._generate(prompt, provider, max_tokens=2000, temperature=0.3)
+        
+        # Process the result to extract the structured data
+        if "text" in result and result["text"]:
+            text = result["text"]
+            
+            # Extract sections using simple text parsing
+            sections = {}
+            current_section = None
+            
+            for line in text.split('\n'):
+                line = line.strip()
+                
+                # Look for section headers
+                if "OVERVIEW:" in line.upper() or line.upper() == "OVERVIEW":
+                    current_section = "overview"
+                    sections[current_section] = []
+                elif "TOPICS:" in line.upper() or line.upper() == "TOPICS":
+                    current_section = "topics" 
+                    sections[current_section] = []
+                elif "INSIGHTS:" in line.upper() or line.upper() == "INSIGHTS":
+                    current_section = "insights"
+                    sections[current_section] = []
+                elif current_section and line:
+                    # If we're in a section and the line has content, add it
+                    sections[current_section].append(line)
+            
+            # Process each section
+            overview = "\n".join(sections.get("overview", []))
+            
+            # Extract topics as a list
+            topics = []
+            for line in sections.get("topics", []):
+                # Look for numbered or bulleted items
+                if (line.startswith("-") or 
+                    line.startswith("•") or 
+                    line.startswith("*") or
+                    (line[0].isdigit() and line[1:3] in (". ", ") "))):
+                    topics.append(line.lstrip("- •*0123456789.) "))
+            
+            # Extract insights as a list
+            insights = []
+            for line in sections.get("insights", []):
+                if (line.startswith("-") or 
+                    line.startswith("•") or 
+                    line.startswith("*") or
+                    (line[0].isdigit() and line[1:3] in (". ", ") "))):
+                    insights.append(line.lstrip("- •*0123456789.) "))
+            
+            return {
+                "overview": overview,
+                "topics": topics,
+                "insights": insights,
+                "provider": result.get("provider"),
+                "model": result.get("model")
+            }
+        
+        # If we couldn't process the text properly, return the raw text
+        return {
+            "overview": result.get("text", ""),
+            "topics": [],
+            "insights": [],
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "error": result.get("error")
+        }
+    
     async def batch_process(
         self,
         texts: List[str],

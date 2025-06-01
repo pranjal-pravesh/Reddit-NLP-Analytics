@@ -89,6 +89,11 @@ async def dashboard(request: Request):
     """Serve the dashboard page"""
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
+@app.get("/llm-analysis")
+async def llm_analysis(request: Request):
+    """Serve the Reddit LLM analysis page"""
+    return templates.TemplateResponse("llm_analysis.html", {"request": request})
+
 
 # Include API routers
 app.include_router(

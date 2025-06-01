@@ -161,4 +161,30 @@ class LLMKeywordClusterResponse(BaseModel):
     text: str
     provider: Optional[str] = None
     model: Optional[str] = None
+    error: Optional[str] = None
+
+
+class RedditPostAnalysisRequest(BaseModel):
+    """Request model for LLM-based Reddit post analysis"""
+    posts: List[Dict[str, Any]] = Field(..., min_items=1, description="List of Reddit posts to analyze")
+    subreddit_name: Optional[str] = Field(None, description="Name of the subreddit (optional)")
+    provider: Optional[str] = Field(None, description="Specific LLM provider to use")
+    max_posts: int = Field(500, ge=10, le=1000, description="Maximum number of posts to analyze")
+    
+    @validator("provider")
+    def validate_provider(cls, v):
+        if v is not None:
+            valid_providers = ["openai", "anthropic", "google"]
+            if v not in valid_providers:
+                raise ValueError(f"Invalid provider. Must be one of: {', '.join(valid_providers)}")
+        return v
+
+
+class RedditPostAnalysisResponse(BaseModel):
+    """Response model for LLM-based Reddit post analysis"""
+    overview: str
+    topics: List[str]
+    insights: List[str]
+    provider: Optional[str] = None
+    model: Optional[str] = None
     error: Optional[str] = None 

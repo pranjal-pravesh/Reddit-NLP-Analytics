@@ -292,6 +292,116 @@ footer {
     border-width: 2px;
 }
 
+.pagination-button:hover {
+    background-color: #f5f5f5;
+    cursor: pointer;
+}
+
+/* LLM Analysis Section */
+.bg-purple {
+    background-color: #7b68ee !important;
+}
+
+/* LLM Analysis section */
+#llm-analysis-section {
+    position: relative;
+}
+
+/* Markdown formatting for LLM output */
+#llm-overview {
+    line-height: 1.6;
+    font-size: 1.05rem;
+}
+
+#llm-topics li, #llm-insights li {
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+}
+
+#llm-topics li strong, #llm-insights li strong {
+    color: var(--secondary-color);
+}
+
+#llm-topics ul, #llm-insights ul {
+    padding-left: 1.5rem;
+    list-style-type: none;
+}
+
+#llm-topics li:before, #llm-insights li:before {
+    content: "•";
+    color: var(--secondary-color);
+    display: inline-block;
+    width: 1em;
+    margin-left: -1em;
+}
+
+#llm-overview h3, #llm-overview h4, #llm-overview h5,
+#llm-topics h3, #llm-topics h4, #llm-topics h5,
+#llm-insights h3, #llm-insights h4, #llm-insights h5 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--dark-color);
+    font-weight: 600;
+}
+
+#llm-topics .list-group-item, #llm-insights .list-group-item {
+    border-left: 4px solid transparent;
+    margin-bottom: 0.5rem;
+    border-radius: var(--border-radius);
+    padding: 0.75rem 1rem;
+    transition: var(--transition);
+    background-color: #f8f9fa;
+}
+
+#llm-topics .list-group-item {
+    border-left-color: var(--secondary-color);
+}
+
+#llm-topics .list-group-item:hover {
+    background-color: #ede7f6;
+}
+
+#llm-insights .list-group-item {
+    border-left-color: var(--info-color);
+}
+
+#llm-insights .list-group-item:hover {
+    background-color: #e0f7fa;
+}
+
+#llm-model-info {
+    font-style: italic;
+}
+
+#run-llm-analysis {
+    cursor: pointer;
+    z-index: 100;
+    position: relative;
+    font-weight: 500;
+}
+
+#run-llm-analysis:hover {
+    background-color: #f5f5f5;
+    transform: translateY(-2px);
+}
+
+/* Hide elements */
 .d-none {
     display: none !important;
+}
+
+/* Sentiment badge colors */
+.sentiment-positive {
+    background-color: #43a047 !important;
+    color: white !important;
+}
+
+.sentiment-negative {
+    background-color: #e53935 !important;
+    color: white !important;
+}
+
+.sentiment-neutral {
+    background-color: #757575 !important;
+    color: white !important;
 } 

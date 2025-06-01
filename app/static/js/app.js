@@ -3,6 +3,215 @@
  * Handles Reddit data retrieval and content analysis
  */
 
+// Declare variables in global scope
+let currentResults = [];
+const apiBaseUrl = '/api/v1';
+let llmContent, llmLoading, llmPlaceholder, llmError, llmErrorMessage, llmProviderSelect;
+let llmOverview, llmTopics, llmInsights, llmModelInfo;
+
+/**
+ * Generate LLM analysis for the current results
+ * This function is defined globally so it can be called from inline HTML handlers
+ */
+async function generateLlmAnalysis() {
+    console.log("generateLlmAnalysis function called");
+    
+    // Get references to DOM elements if they haven't been initialized yet
+    if (!llmContent) {
+        llmContent = document.getElementById('llm-content');
+        llmLoading = document.getElementById('llm-loading');
+        llmPlaceholder = document.getElementById('llm-placeholder');
+        llmError = document.getElementById('llm-error');
+        llmErrorMessage = document.getElementById('llm-error-message');
+        llmProviderSelect = document.getElementById('llm-provider');
+        llmOverview = document.getElementById('llm-overview');
+        llmTopics = document.getElementById('llm-topics');
+        llmInsights = document.getElementById('llm-insights');
+        llmModelInfo = document.getElementById('llm-model-info');
+    }
+    
+    if (!currentResults || currentResults.length === 0) {
+        console.error("No data available for analysis");
+        showLlmError("No data available for analysis. Please fetch Reddit data first.");
+        return;
+    }
+    
+    // Show loading state
+    console.log("Showing loading state");
+    showLlmLoading();
+    
+    try {
+        // Prepare data for analysis
+        const provider = llmProviderSelect.value || null;
+        console.log("Selected provider:", provider);
+        
+        // Try to determine subreddit name if possible
+        let subredditName = null;
+        if (currentResults.length > 0 && currentResults[0].subreddit) {
+            // Check if all posts have the same subreddit
+            const allSameSubreddit = currentResults.every(post => post.subreddit === currentResults[0].subreddit);
+            if (allSameSubreddit) {
+                subredditName = currentResults[0].subreddit;
+            }
+        }
+        console.log("Subreddit name:", subredditName);
+        console.log("Current results count:", currentResults.length);
+        
+        // Prepare request data
+        const requestData = {
+            posts: currentResults,
+            provider: provider,
+            subreddit_name: subredditName,
+            max_posts: Math.min(currentResults.length, 500) // Limit to 500 posts
+        };
+        
+        console.log("Making API request to analyze Reddit posts");
+        
+        // Make API request
+        const response = await fetch(`${apiBaseUrl}/analysis/llm/analyze-reddit-posts`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log("API response received, status:", response.status);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("API error:", errorData);
+            throw new Error(errorData.detail || 'Failed to generate LLM analysis');
+        }
+        
+        // Process response
+        const data = await response.json();
+        console.log("Analysis data received:", data);
+        
+        // Display results
+        displayLlmResults(data);
+        
+    } catch (error) {
+        console.error('Error generating LLM analysis:', error);
+        showLlmError(error.message || 'Failed to generate LLM analysis');
+    }
+}
+
+/**
+ * Show LLM loading state
+ */
+function showLlmLoading() {
+    if (!llmContent) {
+        llmContent = document.getElementById('llm-content');
+        llmLoading = document.getElementById('llm-loading');
+        llmPlaceholder = document.getElementById('llm-placeholder');
+        llmError = document.getElementById('llm-error');
+    }
+    
+    llmContent.classList.add('d-none');
+    llmPlaceholder.classList.add('d-none');
+    llmError.classList.add('d-none');
+    llmLoading.classList.remove('d-none');
+}
+
+/**
+ * Show LLM content
+ */
+function showLlmContent() {
+    if (!llmContent) {
+        llmContent = document.getElementById('llm-content');
+        llmLoading = document.getElementById('llm-loading');
+        llmPlaceholder = document.getElementById('llm-placeholder');
+        llmError = document.getElementById('llm-error');
+    }
+    
+    llmLoading.classList.add('d-none');
+    llmPlaceholder.classList.add('d-none');
+    llmError.classList.add('d-none');
+    llmContent.classList.remove('d-none');
+}
+
+/**
+ * Show LLM error message
+ * @param {String} message - Error message
+ */
+function showLlmError(message) {
+    if (!llmContent) {
+        llmContent = document.getElementById('llm-content');
+        llmLoading = document.getElementById('llm-loading');
+        llmPlaceholder = document.getElementById('llm-placeholder');
+        llmError = document.getElementById('llm-error');
+        llmErrorMessage = document.getElementById('llm-error-message');
+    }
+    
+    llmLoading.classList.add('d-none');
+    llmContent.classList.add('d-none');
+    llmPlaceholder.classList.add('d-none');
+    
+    llmErrorMessage.textContent = message;
+    llmError.classList.remove('d-none');
+}
+
+/**
+ * Display LLM analysis results
+ * @param {Object} data - LLM analysis data
+ */
+function displayLlmResults(data) {
+    if (!llmOverview) {
+        llmOverview = document.getElementById('llm-overview');
+        llmTopics = document.getElementById('llm-topics');
+        llmInsights = document.getElementById('llm-insights');
+        llmModelInfo = document.getElementById('llm-model-info');
+    }
+    
+    // Set overview
+    llmOverview.textContent = data.overview || '';
+    
+    // Set model info
+    let modelInfo = 'Default LLM';
+    if (data.provider && data.model) {
+        modelInfo = `${data.provider} (${data.model})`;
+    }
+    llmModelInfo.textContent = modelInfo;
+    
+    // Clear previous topics and insights
+    llmTopics.innerHTML = '';
+    llmInsights.innerHTML = '';
+    
+    // Add topics
+    if (data.topics && data.topics.length > 0) {
+        data.topics.forEach(topic => {
+            const topicElement = document.createElement('div');
+            topicElement.className = 'list-group-item';
+            topicElement.textContent = topic;
+            llmTopics.appendChild(topicElement);
+        });
+    } else {
+        const noTopics = document.createElement('div');
+        noTopics.className = 'list-group-item text-muted';
+        noTopics.textContent = 'No topics identified';
+        llmTopics.appendChild(noTopics);
+    }
+    
+    // Add insights
+    if (data.insights && data.insights.length > 0) {
+        data.insights.forEach(insight => {
+            const insightElement = document.createElement('div');
+            insightElement.className = 'list-group-item';
+            insightElement.textContent = insight;
+            llmInsights.appendChild(insightElement);
+        });
+    } else {
+        const noInsights = document.createElement('div');
+        noInsights.className = 'list-group-item text-muted';
+        noInsights.textContent = 'No insights provided';
+        llmInsights.appendChild(noInsights);
+    }
+    
+    // Show content
+    showLlmContent();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize variables
     let currentResults = [];
@@ -32,6 +241,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const dashboardPositivePercentage = document.getElementById('dashboard-positive-percentage');
     const dashboardNegativePercentage = document.getElementById('dashboard-negative-percentage');
     const dashboardNeutralPercentage = document.getElementById('dashboard-neutral-percentage');
+    
+    // LLM Analysis Elements
+    const runLlmAnalysisBtn = document.getElementById('run-llm-analysis');
+    llmProviderSelect = document.getElementById('llm-provider');
+    llmLoading = document.getElementById('llm-loading');
+    llmContent = document.getElementById('llm-content');
+    llmPlaceholder = document.getElementById('llm-placeholder');
+    llmError = document.getElementById('llm-error');
+    llmErrorMessage = document.getElementById('llm-error-message');
+    llmOverview = document.getElementById('llm-overview');
+    llmTopics = document.getElementById('llm-topics');
+    llmInsights = document.getElementById('llm-insights');
+    llmModelInfo = document.getElementById('llm-model-info');
     
     // Analysis Modal Elements (for individual post analysis)
     const analysisModal = new bootstrap.Modal(document.getElementById('analysis-modal'));
@@ -65,6 +287,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (analyzeAllBtn) {
         analyzeAllBtn.addEventListener('click', analyzeAllContent);
+    }
+    if (runLlmAnalysisBtn) {
+        console.log("Found LLM Analysis button, adding event listener");
+        runLlmAnalysisBtn.addEventListener('click', function() {
+            console.log("LLM Analysis button clicked");
+            generateLlmAnalysis();
+        });
+    } else {
+        console.error("LLM Analysis button not found in the DOM");
     }
     
     /**
@@ -144,7 +375,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const data = await response.json();
-            currentResults = data.posts || [];
+            // Update the global currentResults variable
+            window.currentResults = data.posts || [];
+            currentResults = data.posts || []; // Ensure both local and global scope are updated
+            
+            console.log(`Fetched ${currentResults.length} posts, set to global currentResults`);
             
             // Display results
             displayResults(currentResults);
@@ -1542,4 +1777,37 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    /**
+     * Debug function to manually check if LLM analysis is possible
+     */
+    function debugLlmState() {
+        console.log("======= LLM ANALYSIS DEBUG INFO =======");
+        console.log("Current results available:", currentResults ? currentResults.length : 0);
+        console.log("LLM DOM Elements:");
+        console.log("- Button:", document.getElementById('run-llm-analysis') ? "Found" : "Not found");
+        console.log("- Content:", document.getElementById('llm-content') ? "Found" : "Not found");
+        console.log("- Loading:", document.getElementById('llm-loading') ? "Found" : "Not found");
+        console.log("- Error:", document.getElementById('llm-error') ? "Found" : "Not found");
+        console.log("- Provider:", document.getElementById('llm-provider') ? "Found" : "Not found");
+        
+        console.log("Function availability:");
+        console.log("- generateLlmAnalysis:", typeof generateLlmAnalysis === "function" ? "Available" : "Not available");
+        console.log("- showLlmLoading:", typeof showLlmLoading === "function" ? "Available" : "Not available");
+        console.log("- showLlmContent:", typeof showLlmContent === "function" ? "Available" : "Not available");
+        console.log("- showLlmError:", typeof showLlmError === "function" ? "Available" : "Not available");
+        
+        console.log("API Base URL:", apiBaseUrl);
+        console.log("======= END DEBUG INFO =======");
+        
+        // If eligible for analysis, provide manual trigger instruction
+        if (currentResults && currentResults.length > 0) {
+            console.log("You can manually trigger LLM analysis by running: generateLlmAnalysis()");
+        } else {
+            console.log("Cannot run analysis - no posts available. Search for Reddit posts first.");
+        }
+    }
+
+    // Auto-run debug function after a short delay to give page time to initialize
+    setTimeout(debugLlmState, 2000);
 }); 
